@@ -1,4 +1,5 @@
-import { thread, type Acceptance, type Program } from './program.js';
+import type { Machine } from './machine.js';
+import type { Acceptance } from './program.js';
 
 interface Capture {
   readonly slot: number;
@@ -7,10 +8,9 @@ interface Capture {
 }
 
 interface Frame {
-  readonly instruction: number;
+  readonly thread: number;
   readonly position: number;
   readonly captures: Capture | null;
-  readonly progressed: boolean;
   branch: number;
 }
 
@@ -20,13 +20,13 @@ type Result =
   | { readonly kind: 'matched'; readonly match: Acceptance };
 
 export class Search<Symbol> {
-  private readonly program: Program<Symbol>;
+  private readonly machine: Machine<Symbol>;
   private readonly failures = new Map<number, Set<number>>();
   private readonly frames: Frame[] = [];
   private position = 0;
 
-  constructor(program: Program<Symbol>) {
-    this.program = program;
+  constructor(machine: Machine<Symbol>) {
+    this.machine = machine;
   }
 
   restart(position: number): void {
@@ -43,25 +43,21 @@ export class Search<Symbol> {
     previous?: Symbol,
   ): Result {
     if (this.frames.length === 0)
-      this.push(this.program.entry, this.position, null, false);
+      this.push(this.machine.entry, this.position, null);
 
     while (this.frames.length > 0) {
       const frame = this.frames[this.frames.length - 1];
-      if (
-        this.failures
-          .get(frame.position)
-          ?.has(thread(frame.instruction, frame.progressed))
-      ) {
+      if (this.failures.get(frame.position)?.has(frame.thread)) {
         this.frames.pop();
         continue;
       }
 
-      const instruction = this.program.instructions[frame.instruction];
-      switch (instruction.kind) {
+      const step = this.machine.steps[frame.thread];
+      switch (step.kind) {
         case 'accept': {
-          const captures = Array<number | null>(
-            this.program.captures.length * 2,
-          ).fill(null);
+          const captures = Array<number | null>(this.machine.captures * 2).fill(
+            null,
+          );
           for (
             let saved = frame.captures;
             saved !== null;
@@ -74,15 +70,12 @@ export class Search<Symbol> {
             match: { start: this.position, end: frame.position, captures },
           };
         }
-        case 'reject':
-          this.reject(frame);
-          break;
         case 'assert': {
           if (frame.branch > 0) {
             this.reject(frame);
             break;
           }
-          const accepted = instruction.accepts({
+          const accepted = step.accepts({
             position: frame.position,
             previous:
               frame.position === this.position
@@ -96,12 +89,7 @@ export class Search<Symbol> {
           if (!accepted) this.reject(frame);
           else {
             frame.branch++;
-            this.push(
-              instruction.next,
-              frame.position,
-              frame.captures,
-              frame.progressed,
-            );
+            this.push(step.next, frame.position, frame.captures);
           }
           break;
         }
@@ -112,15 +100,10 @@ export class Search<Symbol> {
             return { kind: 'pending' };
           } else if (
             frame.position < end &&
-            instruction.accepts(input.get(frame.position)!)
+            step.accepts(input.get(frame.position)!)
           ) {
             frame.branch++;
-            this.push(
-              instruction.next,
-              frame.position + 1,
-              frame.captures,
-              true,
-            );
+            this.push(step.next, frame.position + 1, frame.captures);
           } else {
             this.reject(frame);
           }
@@ -130,43 +113,22 @@ export class Search<Symbol> {
             this.reject(frame);
           } else {
             frame.branch++;
+            this.push(step.next, frame.position, {
+              slot: step.slot,
+              position: frame.position,
+              previous: frame.captures,
+            });
+          }
+          break;
+        case 'choose':
+          if (frame.branch === step.successors.length) {
+            this.reject(frame);
+          } else {
             this.push(
-              instruction.next,
+              step.successors[frame.branch++],
               frame.position,
-              {
-                slot: instruction.slot,
-                position: frame.position,
-                previous: frame.captures,
-              },
-              frame.progressed,
+              frame.captures,
             );
-          }
-          break;
-        case 'iterate':
-          if (frame.branch > 0) {
-            this.reject(frame);
-          } else {
-            frame.branch++;
-            this.push(instruction.next, frame.position, frame.captures, false);
-          }
-          break;
-        case 'progress':
-          if (frame.branch > 0 || !frame.progressed) {
-            this.reject(frame);
-          } else {
-            frame.branch++;
-            this.push(instruction.next, frame.position, frame.captures, true);
-          }
-          break;
-        case 'fork':
-          if (frame.branch === 2) {
-            this.reject(frame);
-          } else {
-            const next =
-              frame.branch++ === 0
-                ? instruction.preferred
-                : instruction.fallback;
-            this.push(next, frame.position, frame.captures, frame.progressed);
           }
           break;
       }
@@ -176,27 +138,20 @@ export class Search<Symbol> {
   }
 
   private push(
-    instruction: number,
+    thread: number,
     position: number,
     captures: Capture | null,
-    progressed: boolean,
   ): void {
-    this.frames.push({
-      instruction,
-      position,
-      captures,
-      progressed,
-      branch: 0,
-    });
+    this.frames.push({ thread, position, captures, branch: 0 });
   }
 
   private reject(frame: Frame): void {
-    let states = this.failures.get(frame.position);
-    if (states === undefined) {
-      states = new Set();
-      this.failures.set(frame.position, states);
+    let threads = this.failures.get(frame.position);
+    if (threads === undefined) {
+      threads = new Set();
+      this.failures.set(frame.position, threads);
     }
-    states.add(thread(frame.instruction, frame.progressed));
+    threads.add(frame.thread);
     this.frames.pop();
   }
 }

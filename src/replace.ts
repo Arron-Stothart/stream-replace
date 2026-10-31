@@ -1,3 +1,4 @@
+import { machine } from './machine.js';
 import type { Acceptance, Program } from './program.js';
 import { Search } from './search.js';
 import { session, type Session } from './session.js';
@@ -20,7 +21,7 @@ export function replacer<Symbol>(
   program: Program<Symbol>,
   replacement: Replacement<Symbol>,
 ): Session<Iterable<Symbol>, Symbol[]> {
-  const search = new Search(program);
+  const search = new Search(machine(program));
   const substitute =
     typeof replacement === 'function' ? replacement : [...replacement];
   const input = new Map<number, Symbol>();

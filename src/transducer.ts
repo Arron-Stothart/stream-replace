@@ -1,36 +1,37 @@
 import { contains, scalar } from './alphabet.js';
 import type { Edge, Graph } from './graph.js';
 import { lookahead } from './lookahead.js';
+import { machine } from './machine.js';
 import { onward } from './onward.js';
 import type { Program } from './program.js';
-
-export type Transducer = Graph;
 
 export function transducer(
   program: Program<number>,
   replacement: readonly number[],
-): Transducer {
+): Graph {
   if (replacement.some((value) => !scalar(value)))
     throw new RangeError('Replacement contains an invalid Unicode scalar');
-  const future = lookahead(program);
+  const threads = machine(program);
+  const { entry, steps } = threads;
+  const future = lookahead(threads);
   const nodes: {
-    instruction: number | null;
+    thread: number | null;
     right: number;
     final: boolean;
     edges: Edge[];
   }[] = [];
   const ids = new Map<string, number>();
 
-  function node(instruction: number | null, right: number): number {
-    const key = `${instruction}:${right}`;
+  function node(thread: number | null, right: number): number {
+    const key = `${thread}:${right}`;
     let id = ids.get(key);
     if (id === undefined) {
       id = nodes.length;
       ids.set(key, id);
       nodes.push({
-        instruction,
+        thread,
         right,
-        final: instruction === null && right === 0,
+        final: thread === null && right === 0,
         edges: [],
       });
     }
@@ -38,74 +39,56 @@ export function transducer(
   }
 
   function settle(
-    instruction: number | null,
-    progressed: boolean,
+    thread: number | null,
     right: number,
     left: number,
   ): { node: number; output: number[] } {
     const output: number[] = [];
     while (true) {
-      if (instruction === null) {
-        if (!future.accepts(program.entry, false, left, right))
+      if (thread === null) {
+        if (!future.accepts(entry, left, right))
           return { node: node(null, right), output };
         for (const symbol of replacement) output.push(symbol);
-        instruction = program.entry;
-        progressed = false;
+        thread = entry;
       }
-      const operation = program.instructions[instruction];
-      switch (operation.kind) {
+      const step = steps[thread];
+      switch (step.kind) {
         case 'accept':
-          if (!progressed) return { node: node(null, right), output };
-          instruction = null;
+          if (!step.progressed) return { node: node(null, right), output };
+          thread = null;
           break;
-        case 'reject':
-          throw new Error('Unreachable rejecting replacement path');
         case 'consume':
-          return { node: node(instruction, right), output };
+          return { node: node(thread, right), output };
         case 'assert':
         case 'save':
-          instruction = operation.next;
+          thread = step.next;
           break;
-        case 'iterate':
-          instruction = operation.next;
-          progressed = false;
-          break;
-        case 'progress':
-          if (!progressed)
+        case 'choose': {
+          const viable = step.successors.find((successor) =>
+            future.accepts(successor, left, right),
+          );
+          if (viable === undefined)
             throw new Error('Unreachable rejecting replacement path');
-          instruction = operation.next;
+          thread = viable;
           break;
-        case 'fork':
-          instruction = future.accepts(
-            operation.preferred,
-            progressed,
-            left,
-            right,
-          )
-            ? operation.preferred
-            : operation.fallback;
-          break;
+        }
       }
     }
   }
 
   const initial = Array.from({ length: future.states }, (_, right) =>
-    settle(null, false, right, 0),
+    settle(null, right, 0),
   );
   for (let index = 0; index < nodes.length; index++) {
     const source = nodes[index];
-    const operation =
-      source.instruction === null
-        ? null
-        : program.instructions[source.instruction];
-    if (operation !== null && operation.kind !== 'consume')
+    const step = source.thread === null ? null : steps[source.thread];
+    if (step !== null && step.kind !== 'consume')
       throw new Error('Unsettled replacement state');
     future.alphabet.forEach((range, atom) => {
-      if (operation !== null && !contains(operation.ranges!, range[0])) return;
+      if (step !== null && !contains(step.ranges!, range[0])) return;
       for (const right of future.successors[source.right][atom]) {
         const target = settle(
-          operation === null ? null : operation.next,
-          operation !== null,
+          step === null ? null : step.next,
           right,
           future.contexts[atom],
         );
@@ -113,7 +96,7 @@ export function transducer(
           range,
           target: target.node,
           output: target.output,
-          copy: operation === null,
+          copy: step === null,
         });
       }
     });

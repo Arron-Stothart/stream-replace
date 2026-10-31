@@ -1,59 +1,50 @@
 import { contains, type Range } from './alphabet.js';
-import { thread, threadInstruction, threads, type Program } from './program.js';
+import type { Machine } from './machine.js';
 
 export interface Lookahead {
   readonly alphabet: readonly Range[];
   readonly states: number;
   readonly contexts: readonly number[];
   readonly successors: readonly (readonly (readonly number[])[])[];
-  accepts(
-    instruction: number,
-    progressed: boolean,
-    left: number,
-    right: number,
-  ): boolean;
+  accepts(thread: number, left: number, right: number): boolean;
 }
 
-export function lookahead(program: Program<number>): Lookahead {
+export function lookahead(machine: Machine<number>): Lookahead {
   const boundaries = new Set([0, 0xd800, 0xe000, 0x110000]);
-  const width = threads(program);
-  const parents: number[][] = Array.from({ length: width }, () => []);
-  const assertions = program.instructions.filter(
-    (instruction) => instruction.kind === 'assert',
-  );
-  program.instructions.forEach((instruction, index) => {
-    if (instruction.kind === 'consume' || instruction.kind === 'assert') {
-      if (
-        instruction.ranges === undefined ||
-        (instruction.kind === 'assert' && instruction.boundary === undefined)
-      ) {
-        throw new TypeError(
-          'Exact emission requires declarative character sets and boundaries',
-        );
-      }
-      for (const [low, high] of instruction.ranges) {
-        boundaries.add(low);
-        boundaries.add(high + 1);
-      }
-    }
-    for (const progressed of [false, true]) {
-      const source = thread(index, progressed);
-      switch (instruction.kind) {
-        case 'fork':
-          parents[thread(instruction.preferred, progressed)].push(source);
-          parents[thread(instruction.fallback, progressed)].push(source);
-          break;
-        case 'save':
-        case 'assert':
-          parents[thread(instruction.next, progressed)].push(source);
-          break;
-        case 'iterate':
-          parents[thread(instruction.next, false)].push(source);
-          break;
-        case 'progress':
-          if (progressed) parents[thread(instruction.next, true)].push(source);
-          break;
-      }
+  const width = machine.steps.length;
+  const parents: number[][] = machine.steps.map(() => []);
+  const assertions = [
+    ...new Set(
+      machine.steps.flatMap((step) =>
+        step.kind === 'assert' ? [step.accepts] : [],
+      ),
+    ),
+  ];
+  machine.steps.forEach((step, thread) => {
+    switch (step.kind) {
+      case 'consume':
+      case 'assert':
+        if (
+          step.ranges === undefined ||
+          (step.kind === 'assert' && step.boundary === undefined)
+        ) {
+          throw new TypeError(
+            'Exact emission requires declarative character sets and boundaries',
+          );
+        }
+        for (const [low, high] of step.ranges) {
+          boundaries.add(low);
+          boundaries.add(high + 1);
+        }
+        if (step.kind === 'assert') parents[step.next].push(thread);
+        break;
+      case 'save':
+        parents[step.next].push(thread);
+        break;
+      case 'choose':
+        for (const successor of step.successors)
+          parents[successor].push(thread);
+        break;
     }
   });
   const points = [...boundaries].sort((a, b) => a - b);
@@ -68,7 +59,7 @@ export function lookahead(program: Program<number>): Lookahead {
     const profile = assertions
       .flatMap((assertion) =>
         following.map((next) =>
-          assertion.accepts({
+          assertion({
             position: 1,
             previous,
             next,
@@ -97,11 +88,11 @@ export function lookahead(program: Program<number>): Lookahead {
     next: number,
   ): bigint {
     const pending: number[] = [];
-    function enabled(index: number, left: number): boolean {
-      const instruction = program.instructions[index];
+    function enabled(thread: number, left: number): boolean {
+      const step = machine.steps[thread];
       return (
-        instruction.kind !== 'assert' ||
-        instruction.accepts({
+        step.kind !== 'assert' ||
+        step.accepts({
           position: left === 0 ? 0 : 1,
           previous: representatives[left],
           next: symbol,
@@ -111,19 +102,15 @@ export function lookahead(program: Program<number>): Lookahead {
       );
     }
     representatives.forEach((_, left) =>
-      program.instructions.forEach((instruction, index) => {
+      machine.steps.forEach((step, thread) => {
         if (
-          instruction.kind === 'accept' ||
-          (instruction.kind === 'consume' &&
+          step.kind === 'accept' ||
+          (step.kind === 'consume' &&
             symbol !== undefined &&
-            contains(instruction.ranges!, symbol) &&
-            (suffix & bits[next * width + thread(instruction.next, true)]) !==
-              0n)
+            contains(step.ranges!, symbol) &&
+            (suffix & bits[next * width + step.next]) !== 0n)
         )
-          pending.push(
-            left * width + thread(index, false),
-            left * width + thread(index, true),
-          );
+          pending.push(left * width + thread);
       }),
     );
     let result = 0n;
@@ -133,8 +120,7 @@ export function lookahead(program: Program<number>): Lookahead {
       result |= bits[index];
       const left = Math.floor(index / width);
       for (const parent of parents[index % width])
-        if (enabled(threadInstruction(parent), left))
-          pending.push(left * width + parent);
+        if (enabled(parent, left)) pending.push(left * width + parent);
     }
     return result;
   }
@@ -163,9 +149,7 @@ export function lookahead(program: Program<number>): Lookahead {
     contexts,
     states: right.length,
     successors,
-    accepts: (instruction, progressed, left, context) =>
-      (right[context] &
-        bits[left * width + thread(instruction, progressed)]) !==
-      0n,
+    accepts: (thread, left, context) =>
+      (right[context] & bits[left * width + thread]) !== 0n,
   };
 }

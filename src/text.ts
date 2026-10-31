@@ -8,7 +8,8 @@ import { session, type Session } from './session.js';
 import { compileTemplate } from './template.js';
 import type { TextReplacement } from './substitution.js';
 export type { TextReplacement } from './substitution.js';
-import { transducer, type Transducer } from './transducer.js';
+import type { Graph } from './graph.js';
+import { transducer } from './transducer.js';
 
 export interface TextMatch {
   readonly text: string;
@@ -74,7 +75,7 @@ function textReplacer(
 
 export function compilePattern(source: string, flags = ''): Pattern {
   const program = compile(parse(source, flags));
-  const literals = new Map<string, Transducer>();
+  const literals = new Map<string, Graph>();
   return {
     program,
     replacer(replacement) {
