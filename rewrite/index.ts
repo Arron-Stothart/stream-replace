@@ -4,3 +4,5 @@ export { compile } from './compile.ts';
 export type { Program, Instruction } from './program.ts';
 export { start, advance, decide, finish } from './machine.ts';
 export type { State, Thread, Acceptance, Decision } from './machine.ts';
+export { Replacer } from './replace.ts';
+export type { Span, Match, Replacement } from './replace.ts';
