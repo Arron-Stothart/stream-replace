@@ -1,0 +1,36 @@
+export type Expression<Symbol> =
+  | { readonly kind: 'empty' }
+  | { readonly kind: 'symbol'; readonly accepts: (symbol: Symbol) => boolean }
+  | { readonly kind: 'sequence'; readonly parts: readonly Expression<Symbol>[] }
+  | { readonly kind: 'choice'; readonly alternatives: readonly Expression<Symbol>[] }
+  | { readonly kind: 'repeat'; readonly body: Expression<Symbol>; readonly greedy: boolean }
+  | { readonly kind: 'capture'; readonly name: string; readonly body: Expression<Symbol> };
+
+export const empty = <Symbol>(): Expression<Symbol> => ({ kind: 'empty' });
+
+export const symbol = <Symbol>(accepts: (symbol: Symbol) => boolean): Expression<Symbol> => ({
+  kind: 'symbol',
+  accepts,
+});
+
+export const sequence = <Symbol>(...parts: Expression<Symbol>[]): Expression<Symbol> => ({
+  kind: 'sequence',
+  parts,
+});
+
+export const choice = <Symbol>(...alternatives: Expression<Symbol>[]): Expression<Symbol> => ({
+  kind: 'choice',
+  alternatives,
+});
+
+export const repeat = <Symbol>(body: Expression<Symbol>, greedy = true): Expression<Symbol> => ({
+  kind: 'repeat',
+  body,
+  greedy,
+});
+
+export const capture = <Symbol>(name: string, body: Expression<Symbol>): Expression<Symbol> => ({
+  kind: 'capture',
+  name,
+  body,
+});
