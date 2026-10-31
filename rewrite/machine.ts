@@ -2,22 +2,25 @@ import type { Program } from './program.ts';
 
 export interface Thread {
   readonly instruction: number;
+  readonly start: number;
   readonly captures: readonly (number | null)[];
 }
 
 export interface Acceptance {
+  readonly start: number;
   readonly end: number;
   readonly captures: readonly (number | null)[];
 }
 
 export interface State {
   readonly position: number;
+  readonly searching: boolean;
   readonly threads: readonly Thread[];
   readonly candidate: Acceptance | null;
 }
 
 export type Decision =
-  | { readonly kind: 'pending' }
+  | { readonly kind: 'pending'; readonly start: number }
   | { readonly kind: 'rejected' }
   | { readonly kind: 'matched'; readonly match: Acceptance };
 
@@ -26,6 +29,7 @@ function settle<Symbol>(
   seeds: readonly Thread[],
   position: number,
   candidate: Acceptance | null,
+  searching: boolean,
 ): State {
   const pending = [...seeds].reverse();
   const visited = new Set<number>();
@@ -39,7 +43,12 @@ function settle<Symbol>(
     const instruction = program.instructions[thread.instruction];
     switch (instruction.kind) {
       case 'accept':
-        return { position, threads, candidate: { end: position, captures: thread.captures } };
+        return {
+          position,
+          searching,
+          threads,
+          candidate: { start: thread.start, end: position, captures: thread.captures },
+        };
       case 'reject':
         break;
       case 'consume':
@@ -47,49 +56,57 @@ function settle<Symbol>(
         break;
       case 'fork':
         pending.push(
-          { instruction: instruction.fallback, captures: thread.captures },
-          { instruction: instruction.preferred, captures: thread.captures },
+          { ...thread, instruction: instruction.fallback },
+          { ...thread, instruction: instruction.preferred },
         );
         break;
       case 'save': {
         const captures = [...thread.captures];
         captures[instruction.slot] = position;
-        pending.push({ instruction: instruction.next, captures });
+        pending.push({ ...thread, instruction: instruction.next, captures });
         break;
       }
     }
   }
 
-  return { position, threads, candidate };
+  return { position, searching, threads, candidate };
 }
 
-export function start<Symbol>(program: Program<Symbol>): State {
-  return settle(program, [{
+function enter<Symbol>(program: Program<Symbol>, position: number): Thread {
+  return {
     instruction: program.entry,
+    start: position,
     captures: Array<number | null>(program.captures.length * 2).fill(null),
-  }], 0, null);
+  };
+}
+
+export function start<Symbol>(program: Program<Symbol>, mode: 'anchored' | 'search' = 'anchored'): State {
+  return settle(program, [enter(program, 0)], 0, null, mode === 'search');
 }
 
 export function decide(state: State): Decision {
-  if (state.threads.length > 0) return { kind: 'pending' };
-  if (state.candidate === null) return { kind: 'rejected' };
-  return { kind: 'matched', match: state.candidate };
+  if (state.threads.length > 0) return { kind: 'pending', start: state.threads[0].start };
+  if (state.candidate !== null) return { kind: 'matched', match: state.candidate };
+  if (state.searching) return { kind: 'pending', start: state.position };
+  return { kind: 'rejected' };
 }
 
 export function advance<Symbol>(program: Program<Symbol>, state: State, symbol: Symbol): State {
-  if (state.threads.length === 0) throw new Error('Cannot advance a settled match');
+  if (decide(state).kind !== 'pending') throw new Error('Cannot advance a settled match');
   const seeds: Thread[] = [];
 
   for (const thread of state.threads) {
     const instruction = program.instructions[thread.instruction];
     if (instruction.kind === 'consume' && instruction.accepts(symbol)) {
-      seeds.push({ instruction: instruction.next, captures: thread.captures });
+      seeds.push({ ...thread, instruction: instruction.next });
     }
   }
 
-  return settle(program, seeds, state.position + 1, state.candidate);
+  const position = state.position + 1;
+  if (state.searching && state.candidate === null) seeds.push(enter(program, position));
+  return settle(program, seeds, position, state.candidate, state.searching);
 }
 
 export function finish(state: State): State {
-  return { ...state, threads: [] };
+  return { ...state, threads: [], searching: false };
 }
