@@ -7,10 +7,6 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    },
-    "./ai": {
-      "types": "./dist/ai.d.ts",
-      "import": "./dist/ai.js"
     }
   },
   "main": "./dist/index.js",
@@ -31,20 +27,10 @@
     "transform",
     "regex",
     "replace",
-    "ai-sdk",
     "streaming"
   ],
   "license": "MIT",
-  "peerDependencies": {
-    "ai": "^5.0.116"
-  },
-  "peerDependenciesMeta": {
-    "ai": {
-      "optional": true
-    }
-  },
   "devDependencies": {
-    "ai": "5.0.116",
     "typescript": "5.9.3",
     "prettier": "3.7.4",
     "eslint": "9.39.2",
