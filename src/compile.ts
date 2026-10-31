@@ -42,23 +42,22 @@ export function compile<Symbol>(
     return instructions.push(instruction) - 1;
   }
 
-  type Request = [Expression<Symbol>, number, number];
+  type Request = [Expression<Symbol>, number];
 
   function* lower(
     expression: Expression<Symbol>,
     continuation: number,
-    emptyContinuation = continuation,
   ): Generator<Request, number, number> {
     switch (expression.kind) {
       case 'empty':
-        return emptyContinuation;
+        return continuation;
       case 'assert':
         return emit({
           kind: 'assert',
           accepts: expression.accepts,
           boundary: expression.boundary,
           ranges: expression.ranges,
-          next: emptyContinuation,
+          next: continuation,
         });
       case 'quantify': {
         const parts: Expression<Symbol>[] = [];
@@ -78,11 +77,7 @@ export function compile<Symbol>(
                 : choice(empty(), expression.body),
             );
           }
-        return yield [
-          { kind: 'sequence', parts },
-          continuation,
-          emptyContinuation,
-        ];
+        return yield [{ kind: 'sequence', parts }, continuation];
       }
       case 'symbol':
         return emit({
@@ -92,27 +87,17 @@ export function compile<Symbol>(
           ranges: expression.ranges,
         });
       case 'sequence': {
-        if (continuation === emptyContinuation) {
-          let next = continuation;
-          for (let index = expression.parts.length - 1; index >= 0; index--)
-            next = yield [expression.parts[index], next, next];
-          return next;
-        }
-        let consumed = continuation;
-        let empty = emptyContinuation;
-        for (let index = expression.parts.length - 1; index >= 0; index--) {
-          const part = expression.parts[index];
-          empty = yield [part, consumed, empty];
-          if (index > 0) consumed = yield [part, consumed, consumed];
-        }
-        return empty;
+        let next = continuation;
+        for (let index = expression.parts.length - 1; index >= 0; index--)
+          next = yield [expression.parts[index], next];
+        return next;
       }
       case 'choice': {
         if (expression.alternatives.length === 0)
           return emit({ kind: 'reject' });
         const entries: number[] = [];
         for (const part of expression.alternatives)
-          entries.push(yield [part, continuation, emptyContinuation]);
+          entries.push(yield [part, continuation]);
         let fallback = entries[entries.length - 1];
         for (let index = entries.length - 2; index >= 0; index--) {
           fallback = emit({
@@ -125,32 +110,24 @@ export function compile<Symbol>(
       }
       case 'repeat': {
         const loop = emit({ kind: 'reject' });
-        const body = yield [expression.body, loop, reject];
+        const progress = emit({ kind: 'progress', next: loop });
+        const body = yield [expression.body, progress];
+        const iteration = emit({ kind: 'iterate', next: body });
         instructions[loop] = expression.greedy
-          ? { kind: 'fork', preferred: body, fallback: continuation }
-          : { kind: 'fork', preferred: continuation, fallback: body };
-        if (continuation === emptyContinuation) return loop;
-        return emit(
-          expression.greedy
-            ? { kind: 'fork', preferred: body, fallback: emptyContinuation }
-            : { kind: 'fork', preferred: emptyContinuation, fallback: body },
-        );
+          ? { kind: 'fork', preferred: iteration, fallback: continuation }
+          : { kind: 'fork', preferred: continuation, fallback: iteration };
+        return loop;
       }
       case 'capture': {
         const slot = captureSlots.get(expression.name)!;
         const end = emit({ kind: 'save', slot: slot + 1, next: continuation });
-        const emptyEnd =
-          continuation === emptyContinuation
-            ? end
-            : emit({ kind: 'save', slot: slot + 1, next: emptyContinuation });
-        const body = yield [expression.body, end, emptyEnd];
+        const body = yield [expression.body, end];
         return emit({ kind: 'save', slot, next: body });
       }
     }
   }
 
   declareCaptures(expression);
-  const reject = emit({ kind: 'reject' });
   const pending = [lower(expression, emit({ kind: 'accept' }))];
   let entry: number | undefined;
   while (pending.length > 0) {

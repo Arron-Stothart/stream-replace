@@ -27,10 +27,20 @@ export type Instruction<Symbol> =
       readonly preferred: number;
       readonly fallback: number;
     }
-  | { readonly kind: 'save'; readonly slot: number; readonly next: number };
+  | { readonly kind: 'save'; readonly slot: number; readonly next: number }
+  | { readonly kind: 'iterate'; readonly next: number }
+  | { readonly kind: 'progress'; readonly next: number };
 
 export interface Program<Symbol> {
   readonly entry: number;
   readonly instructions: readonly Instruction<Symbol>[];
   readonly captures: readonly string[];
 }
+
+export const thread = (instruction: number, progressed: boolean): number =>
+  instruction * 2 + Number(progressed);
+
+export const threadInstruction = (thread: number): number => thread >> 1;
+
+export const threads = <Symbol>(program: Program<Symbol>): number =>
+  program.instructions.length * 2;

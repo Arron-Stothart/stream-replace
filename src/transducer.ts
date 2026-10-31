@@ -39,23 +39,23 @@ export function transducer(
 
   function settle(
     instruction: number | null,
-    consumed: boolean,
+    progressed: boolean,
     right: number,
     left: number,
   ): { node: number; output: number[] } {
     const output: number[] = [];
     while (true) {
       if (instruction === null) {
-        if (!future.accepts(program.entry, left, right))
+        if (!future.accepts(program.entry, false, left, right))
           return { node: node(null, right), output };
         for (const symbol of replacement) output.push(symbol);
         instruction = program.entry;
-        consumed = false;
+        progressed = false;
       }
       const operation = program.instructions[instruction];
       switch (operation.kind) {
         case 'accept':
-          if (!consumed) return { node: node(null, right), output };
+          if (!progressed) return { node: node(null, right), output };
           instruction = null;
           break;
         case 'reject':
@@ -66,8 +66,22 @@ export function transducer(
         case 'save':
           instruction = operation.next;
           break;
+        case 'iterate':
+          instruction = operation.next;
+          progressed = false;
+          break;
+        case 'progress':
+          if (!progressed)
+            throw new Error('Unreachable rejecting replacement path');
+          instruction = operation.next;
+          break;
         case 'fork':
-          instruction = future.accepts(operation.preferred, left, right)
+          instruction = future.accepts(
+            operation.preferred,
+            progressed,
+            left,
+            right,
+          )
             ? operation.preferred
             : operation.fallback;
           break;

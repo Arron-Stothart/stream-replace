@@ -1,17 +1,23 @@
 import { contains, type Range } from './alphabet.js';
-import type { Program } from './program.js';
+import { thread, threadInstruction, threads, type Program } from './program.js';
 
 export interface Lookahead {
   readonly alphabet: readonly Range[];
   readonly states: number;
   readonly contexts: readonly number[];
   readonly successors: readonly (readonly (readonly number[])[])[];
-  accepts(instruction: number, left: number, right: number): boolean;
+  accepts(
+    instruction: number,
+    progressed: boolean,
+    left: number,
+    right: number,
+  ): boolean;
 }
 
 export function lookahead(program: Program<number>): Lookahead {
   const boundaries = new Set([0, 0xd800, 0xe000, 0x110000]);
-  const parents: number[][] = program.instructions.map(() => []);
+  const width = threads(program);
+  const parents: number[][] = Array.from({ length: width }, () => []);
   const assertions = program.instructions.filter(
     (instruction) => instruction.kind === 'assert',
   );
@@ -30,11 +36,25 @@ export function lookahead(program: Program<number>): Lookahead {
         boundaries.add(high + 1);
       }
     }
-    if (instruction.kind === 'fork') {
-      parents[instruction.preferred].push(index);
-      parents[instruction.fallback].push(index);
-    } else if (instruction.kind === 'save' || instruction.kind === 'assert')
-      parents[instruction.next].push(index);
+    for (const progressed of [false, true]) {
+      const source = thread(index, progressed);
+      switch (instruction.kind) {
+        case 'fork':
+          parents[thread(instruction.preferred, progressed)].push(source);
+          parents[thread(instruction.fallback, progressed)].push(source);
+          break;
+        case 'save':
+        case 'assert':
+          parents[thread(instruction.next, progressed)].push(source);
+          break;
+        case 'iterate':
+          parents[thread(instruction.next, false)].push(source);
+          break;
+        case 'progress':
+          if (progressed) parents[thread(instruction.next, true)].push(source);
+          break;
+      }
+    }
   });
   const points = [...boundaries].sort((a, b) => a - b);
   const alphabet: Range[] = points
@@ -66,9 +86,8 @@ export function lookahead(program: Program<number>): Lookahead {
     }
     return id;
   });
-  const size = program.instructions.length;
   const bits = Array.from(
-    { length: size * representatives.length },
+    { length: width * representatives.length },
     (_, index) => 1n << BigInt(index),
   );
 
@@ -98,9 +117,13 @@ export function lookahead(program: Program<number>): Lookahead {
           (instruction.kind === 'consume' &&
             symbol !== undefined &&
             contains(instruction.ranges!, symbol) &&
-            (suffix & bits[next * size + instruction.next]) !== 0n)
+            (suffix & bits[next * width + thread(instruction.next, true)]) !==
+              0n)
         )
-          pending.push(left * size + index);
+          pending.push(
+            left * width + thread(index, false),
+            left * width + thread(index, true),
+          );
       }),
     );
     let result = 0n;
@@ -108,9 +131,10 @@ export function lookahead(program: Program<number>): Lookahead {
       const index = pending.pop()!;
       if ((result & bits[index]) !== 0n) continue;
       result |= bits[index];
-      const left = Math.floor(index / size);
-      for (const parent of parents[index % size])
-        if (enabled(parent, left)) pending.push(left * size + parent);
+      const left = Math.floor(index / width);
+      for (const parent of parents[index % width])
+        if (enabled(threadInstruction(parent), left))
+          pending.push(left * width + parent);
     }
     return result;
   }
@@ -120,12 +144,12 @@ export function lookahead(program: Program<number>): Lookahead {
   const transitions: number[][] = [];
   for (let index = 0; index < right.length; index++) {
     transitions[index] = alphabet.map(([symbol], atom) => {
-      const state = precede(symbol, right[index], contexts[atom]);
-      let id = ids.get(state);
+      const reachable = precede(symbol, right[index], contexts[atom]);
+      let id = ids.get(reachable);
       if (id === undefined) {
         id = right.length;
-        ids.set(state, id);
-        right.push(state);
+        ids.set(reachable, id);
+        right.push(reachable);
       }
       return id;
     });
@@ -139,7 +163,9 @@ export function lookahead(program: Program<number>): Lookahead {
     contexts,
     states: right.length,
     successors,
-    accepts: (instruction, left, context) =>
-      (right[context] & bits[left * size + instruction]) !== 0n,
+    accepts: (instruction, progressed, left, context) =>
+      (right[context] &
+        bits[left * width + thread(instruction, progressed)]) !==
+      0n,
   };
 }
