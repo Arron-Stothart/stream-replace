@@ -261,6 +261,43 @@ test('malformed UTF-16 fails the text session instead of entering the scalar mod
   );
 });
 
+test('replacement descriptions expose their interpretation and emission timing', () => {
+  const pattern = compilePattern('(a+)');
+  const fixed = pattern.replacer(literal('$1'));
+  assert.equal(fixed.emission, 'earliest');
+  assert.equal(fixed.write('a'), '$1');
+  assert.equal(fixed.write('a'), '');
+  assert.equal(fixed.finish(), '');
+
+  const captured = pattern.replacer(template('$1'));
+  assert.equal(captured.emission, 'after-match');
+  assert.equal(captured.write('aa'), '');
+  assert.equal(captured.finish(), 'aa');
+
+  const identity = pattern.replacer(template('$&'));
+  assert.equal(identity.emission, 'earliest');
+  assert.equal(identity.write('aa'), 'aa');
+  assert.equal(identity.finish(), '');
+
+  const calls = [];
+  const mapped = pattern.replacer(
+    mapMatch((match) => {
+      calls.push(match.text);
+      return String(match.text.length);
+    }),
+  );
+  assert.equal(mapped.emission, 'after-match');
+  assert.equal(mapped.write('a'), '');
+  assert.equal(mapped.write('a'), '');
+  assert.deepEqual(calls, []);
+  assert.equal(mapped.finish(), '2');
+  assert.deepEqual(calls, ['aa']);
+  assert.throws(
+    () => compilePattern('a').replacer(template('$1')),
+    /Unknown capture/,
+  );
+});
+
 test('pattern nesting does not consume the JavaScript call stack', () => {
   const depth = 4000;
   const pattern = compilePattern('('.repeat(depth) + 'a' + ')'.repeat(depth));

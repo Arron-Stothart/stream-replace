@@ -5,14 +5,21 @@ export type TextReplacement =
   | { readonly kind: 'template'; readonly source: string }
   | { readonly kind: 'callback'; readonly apply: (match: TextMatch) => string };
 
-export const literal = (value: string): TextReplacement => ({
+export const literal = (
+  value: string,
+): Extract<TextReplacement, { kind: 'literal' }> => ({
   kind: 'literal',
   value,
 });
-export const template = (source: string): TextReplacement => ({
+export const template = (
+  source: string,
+): Extract<TextReplacement, { kind: 'template' }> => ({
   kind: 'template',
   source,
 });
 export const mapMatch = (
   apply: (match: TextMatch) => string,
-): TextReplacement => ({ kind: 'callback', apply });
+): Extract<TextReplacement, { kind: 'callback' }> => ({
+  kind: 'callback',
+  apply,
+});
