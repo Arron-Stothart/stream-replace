@@ -1,16 +1,11 @@
+import { slots, type Saved } from './capture.js';
 import type { Machine } from './machine.js';
 import type { Acceptance } from './program.js';
-
-interface Capture {
-  readonly slot: number;
-  readonly position: number;
-  readonly previous: Capture | null;
-}
 
 interface Frame {
   readonly thread: number;
   readonly position: number;
-  readonly captures: Capture | null;
+  readonly captures: Saved | null;
   branch: number;
 }
 
@@ -54,22 +49,15 @@ export class Search<Symbol> {
 
       const step = this.machine.steps[frame.thread];
       switch (step.kind) {
-        case 'accept': {
-          const captures = Array<number | null>(this.machine.captures * 2).fill(
-            null,
-          );
-          for (
-            let saved = frame.captures;
-            saved !== null;
-            saved = saved.previous
-          ) {
-            captures[saved.slot] ??= saved.position;
-          }
+        case 'accept':
           return {
             kind: 'matched',
-            match: { start: this.position, end: frame.position, captures },
+            match: {
+              start: this.position,
+              end: frame.position,
+              captures: slots(frame.captures, this.machine.captures),
+            },
           };
-        }
         case 'assert': {
           if (frame.branch > 0) {
             this.reject(frame);
@@ -137,11 +125,7 @@ export class Search<Symbol> {
     return { kind: 'rejected' };
   }
 
-  private push(
-    thread: number,
-    position: number,
-    captures: Capture | null,
-  ): void {
+  private push(thread: number, position: number, captures: Saved | null): void {
     this.frames.push({ thread, position, captures, branch: 0 });
   }
 

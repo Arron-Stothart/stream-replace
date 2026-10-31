@@ -14,8 +14,8 @@ function common(
   return left.slice(0, length);
 }
 
-export function prefixes(graph: Graph): readonly (readonly number[])[] {
-  const incoming: { source: number; edge: Edge }[][] = graph.nodes.map(
+export function prefixes(graph: Graph<number>): readonly (readonly number[])[] {
+  const incoming: { source: number; edge: Edge<number> }[][] = graph.nodes.map(
     () => [],
   );
   graph.nodes.forEach((source, index) => {
@@ -70,7 +70,7 @@ export function prefixes(graph: Graph): readonly (readonly number[])[] {
   return result;
 }
 
-export function onward(graph: Graph): Graph {
+export function onward(graph: Graph<number>): Graph<number> {
   const prefix = prefixes(graph);
   return {
     initial: graph.initial.map((initial) => ({

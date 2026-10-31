@@ -17,6 +17,23 @@ export type Replacement<Symbol> =
   | Iterable<Symbol>
   | ((match: Match<Symbol>) => Iterable<Symbol>);
 
+export function match<Symbol>(
+  acceptance: Acceptance,
+  input: ReadonlyMap<number, Symbol>,
+  names: readonly string[],
+): Match<Symbol> {
+  const { start, end, captures: slots } = acceptance;
+  const symbols: Symbol[] = [];
+  for (let index = start; index < end; index++) symbols.push(input.get(index)!);
+  const captures = new Map<string, Span | null>();
+  names.forEach((name, index) => {
+    const start = slots[index * 2];
+    const end = slots[index * 2 + 1];
+    captures.set(name, start === null || end === null ? null : { start, end });
+  });
+  return { start, end, symbols, captures };
+}
+
 export function replacer<Symbol>(
   program: Program<Symbol>,
   replacement: Replacement<Symbol>,
@@ -38,23 +55,6 @@ export function replacer<Symbol>(
     search.restart(next);
   }
 
-  function match(acceptance: Acceptance): Match<Symbol> {
-    const { start, end, captures: slots } = acceptance;
-    const symbols: Symbol[] = [];
-    for (let index = start; index < end; index++)
-      symbols.push(input.get(index)!);
-    const captures = new Map<string, Span | null>();
-    program.captures.forEach((name, index) => {
-      const start = slots[index * 2];
-      const end = slots[index * 2 + 1];
-      captures.set(
-        name,
-        start === null || end === null ? null : { start, end },
-      );
-    });
-    return { start, end, symbols, captures };
-  }
-
   function drain(output: Symbol[], closed: boolean): void {
     while (true) {
       if (skipEmpty) {
@@ -73,7 +73,7 @@ export function replacer<Symbol>(
       }
       const replacement =
         typeof substitute === 'function'
-          ? substitute(match(result.match))
+          ? substitute(match(result.match, input, program.captures))
           : substitute;
       for (const symbol of replacement) output.push(symbol);
       skipEmpty = result.match.start === result.match.end;

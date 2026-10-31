@@ -1,14 +1,15 @@
 import { compile } from './compile.js';
 import { Decoder, decode, encode } from './decode.js';
-import { exactReplacer } from './exact.js';
+import { exactReplacer, settledReplacer } from './exact.js';
 import { parse } from './parse.js';
 import type { Program } from './program.js';
-import { replacer, type Match } from './replace.js';
+import type { Match } from './replace.js';
+import { selection, type Mark } from './selection.js';
 import { session, type Session } from './session.js';
 import { compileTemplate } from './template.js';
 import type { TextMatch, TextReplacement } from './substitution.js';
 import type { Graph } from './graph.js';
-import { transducer } from './transducer.js';
+import { project } from './transducer.js';
 
 export interface TextReplacer extends Session<string, string> {
   readonly emission: 'earliest' | 'after-match';
@@ -66,18 +67,21 @@ function textReplacer(
 
 export function compilePattern(source: string, flags = ''): Pattern {
   const program = compile(parse(source, flags));
-  const literals = new Map<string, Graph>();
+  let selected: Graph<Mark> | undefined;
+  const selectionGraph = (): Graph<Mark> => (selected ??= selection(program));
+  const literals = new Map<string, Graph<number>>();
+  const settled = (
+    replacement: (match: Match<number>) => Iterable<number>,
+  ): TextReplacer =>
+    textReplacer(
+      settledReplacer(selectionGraph(), program.captures, replacement),
+      'after-match',
+    );
   return {
     program,
     replacer(replacement) {
-      if (replacement.kind === 'callback') {
-        return textReplacer(
-          replacer(program, (match) =>
-            decode(replacement.apply(textMatch(match))),
-          ),
-          'after-match',
-        );
-      }
+      if (replacement.kind === 'callback')
+        return settled((match) => decode(replacement.apply(textMatch(match))));
       if (replacement.kind === 'template' && replacement.source === '$&') {
         return textReplacer(
           { write: (symbols) => [...symbols], finish: () => [] },
@@ -88,13 +92,12 @@ export function compilePattern(source: string, flags = ''): Pattern {
         replacement.kind === 'literal'
           ? decode(replacement.value)
           : compileTemplate(replacement.source, program.captures);
-      if (typeof parsed === 'function')
-        return textReplacer(replacer(program, parsed), 'after-match');
+      if (typeof parsed === 'function') return settled(parsed);
       const symbols = [...parsed];
       const key = encode(symbols);
       let machine = literals.get(key);
       if (machine === undefined) {
-        machine = transducer(program, symbols);
+        machine = project(selectionGraph(), symbols);
         literals.set(key, machine);
       }
       return textReplacer(exactReplacer(machine), 'earliest');

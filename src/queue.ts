@@ -1,26 +1,26 @@
-interface Link {
-  readonly values: readonly number[];
-  readonly next: Link | null;
+interface Link<Value> {
+  readonly values: readonly Value[];
+  readonly next: Link<Value> | null;
 }
 
-export class Output {
-  private front: Link | null = null;
-  private back: Link | null = null;
+export class Queue<Value> {
+  private front: Link<Value> | null = null;
+  private back: Link<Value> | null = null;
   private offset = 0;
 
-  fork(): Output {
-    const output = new Output();
-    output.front = this.front;
-    output.back = this.back;
-    output.offset = this.offset;
-    return output;
+  fork(): Queue<Value> {
+    const queue = new Queue<Value>();
+    queue.front = this.front;
+    queue.back = this.back;
+    queue.offset = this.offset;
+    return queue;
   }
 
-  append(values: readonly number[]): void {
+  append(values: readonly Value[]): void {
     if (values.length > 0) this.back = { values, next: this.back };
   }
 
-  peek(): number | undefined {
+  peek(): Value | undefined {
     if (this.front === null) {
       for (let link = this.back; link !== null; link = link.next) {
         this.front = { values: link.values, next: this.front };
