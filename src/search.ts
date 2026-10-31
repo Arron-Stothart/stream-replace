@@ -1,5 +1,5 @@
-import type { Acceptance } from './program.ts';
-import type { Program } from './program.ts';
+import type { Acceptance } from './program.js';
+import type { Program } from './program.js';
 
 interface Capture {
   readonly slot: number;
@@ -30,13 +30,20 @@ export class Search<Symbol> {
   }
 
   restart(position: number): void {
-    for (let index = this.position; index < position; index++) this.failures.delete(index);
+    for (let index = this.position; index < position; index++)
+      this.failures.delete(index);
     this.position = position;
     this.frames.length = 0;
   }
 
-  resume(input: ReadonlyMap<number, Symbol>, end: number, closed: boolean, previous?: Symbol): Result {
-    if (this.frames.length === 0) this.push(this.program.entry, this.position, null);
+  resume(
+    input: ReadonlyMap<number, Symbol>,
+    end: number,
+    closed: boolean,
+    previous?: Symbol,
+  ): Result {
+    if (this.frames.length === 0)
+      this.push(this.program.entry, this.position, null);
 
     while (this.frames.length > 0) {
       const frame = this.frames[this.frames.length - 1];
@@ -48,11 +55,20 @@ export class Search<Symbol> {
       const instruction = this.program.instructions[frame.instruction];
       switch (instruction.kind) {
         case 'accept': {
-          const captures = Array<number | null>(this.program.captures.length * 2).fill(null);
-          for (let saved = frame.captures; saved !== null; saved = saved.previous) {
+          const captures = Array<number | null>(
+            this.program.captures.length * 2,
+          ).fill(null);
+          for (
+            let saved = frame.captures;
+            saved !== null;
+            saved = saved.previous
+          ) {
             captures[saved.slot] ??= saved.position;
           }
-          return { kind: 'matched', match: { start: this.position, end: frame.position, captures } };
+          return {
+            kind: 'matched',
+            match: { start: this.position, end: frame.position, captures },
+          };
         }
         case 'reject':
           this.reject(frame);
@@ -64,7 +80,10 @@ export class Search<Symbol> {
           }
           const accepted = instruction.accepts({
             position: frame.position,
-            previous: frame.position === this.position ? previous : input.get(frame.position - 1),
+            previous:
+              frame.position === this.position
+                ? previous
+                : input.get(frame.position - 1),
             next: input.get(frame.position),
             hasNext: frame.position < end,
             ended: closed && frame.position === end,
@@ -82,7 +101,10 @@ export class Search<Symbol> {
             this.reject(frame);
           } else if (frame.position === end && !closed) {
             return { kind: 'pending' };
-          } else if (frame.position < end && instruction.accepts(input.get(frame.position)!)) {
+          } else if (
+            frame.position < end &&
+            instruction.accepts(input.get(frame.position)!)
+          ) {
             frame.branch++;
             this.push(instruction.next, frame.position + 1, frame.captures);
           } else {
@@ -105,7 +127,10 @@ export class Search<Symbol> {
           if (frame.branch === 2) {
             this.reject(frame);
           } else {
-            const next = frame.branch++ === 0 ? instruction.preferred : instruction.fallback;
+            const next =
+              frame.branch++ === 0
+                ? instruction.preferred
+                : instruction.fallback;
             this.push(next, frame.position, frame.captures);
           }
           break;
@@ -115,7 +140,11 @@ export class Search<Symbol> {
     return { kind: 'rejected' };
   }
 
-  private push(instruction: number, position: number, captures: Capture | null): void {
+  private push(
+    instruction: number,
+    position: number,
+    captures: Capture | null,
+  ): void {
     this.frames.push({ instruction, position, captures, branch: 0 });
   }
 

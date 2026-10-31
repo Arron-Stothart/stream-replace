@@ -5,6 +5,7 @@ export default [
   {
     ignores: ['dist/', 'node_modules/']
   },
+  { files: ['test/**/*.mjs'], languageOptions: { globals: { ReadableStream: 'readonly' } } },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
 ];

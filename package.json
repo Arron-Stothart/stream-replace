@@ -1,29 +1,30 @@
 {
   "name": "regex-stream-transform",
   "version": "0.1.0",
-  "description": "Regex find-and-replace for streams with zero unnecessary buffering",
+  "description": "Incremental regex replacement with exact literal emission",
   "type": "module",
   "exports": {
     ".": {
-      "import": "./dist/replace-in-stream.js",
-      "types": "./dist/replace-in-stream.d.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     },
     "./ai": {
-      "import": "./dist/replace-in-ai-sdk-stream.js",
-      "types": "./dist/replace-in-ai-sdk-stream.d.ts"
+      "types": "./dist/ai.d.ts",
+      "import": "./dist/ai.js"
     }
   },
-  "main": "./dist/replace-in-stream.js",
-  "types": "./dist/replace-in-stream.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "files": [
     "dist"
   ],
   "scripts": {
     "build": "tsc",
-    "test": "vitest",
-    "lint": "eslint .",
-    "format": "prettier --write \"*.ts\"",
-    "prepublishOnly": "npm run build"
+    "test": "npm run build && node --test test/*.test.mjs",
+    "lint": "eslint src test",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.mjs\"",
+    "prepublishOnly": "npm run build",
+    "check": "tsc --noEmit"
   },
   "keywords": [
     "stream",
@@ -35,7 +36,7 @@
   ],
   "license": "MIT",
   "peerDependencies": {
-    "ai": ">=5.0.0-beta.1"
+    "ai": "^5.0.116"
   },
   "peerDependenciesMeta": {
     "ai": {
@@ -43,14 +44,12 @@
     }
   },
   "devDependencies": {
-    "ai": "^5.0.0-beta.1",
-    "@eslint/js": "^9.39.2",
-    "@types/node": "^22.0.0",
-    "eslint": "^9.39.2",
-    "prettier": "^3.7.4",
-    "typescript": "^5.9.3",
-    "typescript-eslint": "^8.50.1",
-    "vitest": "^4.0.16"
+    "ai": "5.0.116",
+    "typescript": "5.9.3",
+    "prettier": "3.7.4",
+    "eslint": "9.39.2",
+    "@eslint/js": "9.39.2",
+    "typescript-eslint": "8.50.1"
   },
   "engines": {
     "node": ">=18"
