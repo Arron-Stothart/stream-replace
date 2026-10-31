@@ -1,4 +1,4 @@
-import type { Acceptance } from './machine.ts';
+import type { Acceptance } from './program.ts';
 import type { Program } from './program.ts';
 
 interface Capture {
@@ -35,7 +35,7 @@ export class Search<Symbol> {
     this.frames.length = 0;
   }
 
-  resume(input: ReadonlyMap<number, Symbol>, end: number, closed: boolean): Result {
+  resume(input: ReadonlyMap<number, Symbol>, end: number, closed: boolean, previous?: Symbol): Result {
     if (this.frames.length === 0) this.push(this.program.entry, this.position, null);
 
     while (this.frames.length > 0) {
@@ -57,6 +57,26 @@ export class Search<Symbol> {
         case 'reject':
           this.reject(frame);
           break;
+        case 'assert': {
+          if (frame.branch > 0) {
+            this.reject(frame);
+            break;
+          }
+          const accepted = instruction.accepts({
+            position: frame.position,
+            previous: frame.position === this.position ? previous : input.get(frame.position - 1),
+            next: input.get(frame.position),
+            hasNext: frame.position < end,
+            ended: closed && frame.position === end,
+          });
+          if (accepted === undefined) return { kind: 'pending' };
+          if (!accepted) this.reject(frame);
+          else {
+            frame.branch++;
+            this.push(instruction.next, frame.position, frame.captures);
+          }
+          break;
+        }
         case 'consume':
           if (frame.branch > 0) {
             this.reject(frame);

@@ -1,4 +1,4 @@
-import type { Expression } from './expression.ts';
+import { choice, empty, repeat, sequence, type Expression } from './expression.ts';
 import type { Instruction, Program } from './program.ts';
 
 export function compile<Symbol>(expression: Expression<Symbol>): Program<Symbol> {
@@ -21,6 +21,7 @@ export function compile<Symbol>(expression: Expression<Symbol>): Program<Symbol>
         expression.alternatives.forEach(declareCaptures);
         break;
       case 'repeat':
+      case 'quantify':
         declareCaptures(expression.body);
         break;
     }
@@ -38,8 +39,19 @@ export function compile<Symbol>(expression: Expression<Symbol>): Program<Symbol>
     switch (expression.kind) {
       case 'empty':
         return emptyContinuation;
+      case 'assert':
+        return emit({ kind: 'assert', accepts: expression.accepts, boundary: expression.boundary, next: emptyContinuation });
+      case 'quantify': {
+        const parts: Expression<Symbol>[] = [];
+        for (let index = 0; index < expression.minimum; index++) parts.push(expression.body);
+        if (expression.maximum === Infinity) parts.push(repeat(expression.body, expression.greedy));
+        else for (let index = expression.minimum; index < expression.maximum; index++) {
+          parts.push(expression.greedy ? choice(expression.body, empty()) : choice(empty(), expression.body));
+        }
+        return lower(sequence(...parts), continuation, emptyContinuation);
+      }
       case 'symbol':
-        return emit({ kind: 'consume', accepts: expression.accepts, next: continuation });
+        return emit({ kind: 'consume', accepts: expression.accepts, next: continuation, ranges: expression.ranges });
       case 'sequence': {
         if (continuation === emptyContinuation) {
           return expression.parts.reduceRight((next, part) => lower(part, next), continuation);

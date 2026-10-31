@@ -1,4 +1,4 @@
-import type { Acceptance } from './machine.ts';
+import type { Acceptance } from './program.ts';
 import type { Program } from './program.ts';
 import { Search } from './search.ts';
 
@@ -21,6 +21,7 @@ export class Replacer<Symbol> {
   private readonly input = new Map<number, Symbol>();
   private position = 0;
   private end = 0;
+  private previous: Symbol | undefined;
   private skipEmpty = false;
   private status: 'ready' | 'running' | 'finished' | 'failed' = 'ready';
 
@@ -67,7 +68,7 @@ export class Replacer<Symbol> {
         this.skipEmpty = false;
       }
 
-      const result = this.search.resume(this.input, this.end, closed);
+      const result = this.search.resume(this.input, this.end, closed, this.previous);
       if (result.kind === 'pending') return;
       if (result.kind === 'rejected') {
         if (this.position === this.end) return;
@@ -100,7 +101,10 @@ export class Replacer<Symbol> {
   }
 
   private release(position: number): void {
-    while (this.position < position) this.input.delete(this.position++);
+    while (this.position < position) {
+      this.previous = this.input.get(this.position);
+      this.input.delete(this.position++);
+    }
     this.search.restart(position);
   }
 }

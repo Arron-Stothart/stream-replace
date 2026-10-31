@@ -1,6 +1,10 @@
+import type { Boundary, Context } from './boundary.ts';
+
 export type Expression<Symbol> =
   | { readonly kind: 'empty' }
-  | { readonly kind: 'symbol'; readonly accepts: (symbol: Symbol) => boolean }
+  | { readonly kind: 'assert'; readonly accepts: (context: Context<Symbol>) => boolean | undefined; readonly boundary?: Boundary }
+  | { readonly kind: 'quantify'; readonly body: Expression<Symbol>; readonly minimum: number; readonly maximum: number; readonly greedy: boolean }
+  | { readonly kind: 'symbol'; readonly accepts: (symbol: Symbol) => boolean; readonly ranges?: readonly (readonly [number, number])[] }
   | { readonly kind: 'sequence'; readonly parts: readonly Expression<Symbol>[] }
   | { readonly kind: 'choice'; readonly alternatives: readonly Expression<Symbol>[] }
   | { readonly kind: 'repeat'; readonly body: Expression<Symbol>; readonly greedy: boolean }
@@ -34,3 +38,10 @@ export const capture = <Symbol>(name: string, body: Expression<Symbol>): Express
   name,
   body,
 });
+
+export function quantify<Symbol>(body: Expression<Symbol>, minimum: number, maximum = minimum, greedy = true): Expression<Symbol> {
+  if (!Number.isSafeInteger(minimum) || minimum < 0 || maximum !== Infinity && !Number.isSafeInteger(maximum) || maximum < minimum) {
+    throw new RangeError('Invalid repetition bounds');
+  }
+  return { kind: 'quantify', body, minimum, maximum, greedy };
+}
