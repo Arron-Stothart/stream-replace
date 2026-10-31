@@ -1,4 +1,10 @@
-import type { TextMatch } from './text.js';
+export interface TextMatch {
+  readonly text: string;
+  readonly groups: readonly (string | undefined)[];
+  readonly captures: ReadonlyMap<string, string | undefined>;
+  readonly start: number;
+  readonly end: number;
+}
 
 export type TextReplacement =
   | { readonly kind: 'literal'; readonly value: string }

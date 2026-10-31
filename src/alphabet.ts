@@ -1,5 +1,3 @@
-import type { Expression } from './expression.js';
-
 export type Range = readonly [number, number];
 
 export const scalar = (value: number): boolean =>
@@ -57,13 +55,4 @@ export function contains(values: readonly Range[], value: number): boolean {
     else return true;
   }
   return false;
-}
-
-export function codepoints(values: readonly Range[]): Expression<number> {
-  const normalized = ranges(values);
-  return {
-    kind: 'symbol',
-    accepts: (value) => scalar(value) && contains(normalized, value),
-    ranges: normalized,
-  };
 }

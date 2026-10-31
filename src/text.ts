@@ -6,18 +6,9 @@ import type { Program } from './program.js';
 import { replacer, type Match } from './replace.js';
 import { session, type Session } from './session.js';
 import { compileTemplate } from './template.js';
-import type { TextReplacement } from './substitution.js';
-export type { TextReplacement } from './substitution.js';
+import type { TextMatch, TextReplacement } from './substitution.js';
 import type { Graph } from './graph.js';
 import { transducer } from './transducer.js';
-
-export interface TextMatch {
-  readonly text: string;
-  readonly groups: readonly (string | undefined)[];
-  readonly captures: ReadonlyMap<string, string | undefined>;
-  readonly start: number;
-  readonly end: number;
-}
 
 export interface TextReplacer extends Session<string, string> {
   readonly emission: 'earliest' | 'after-match';

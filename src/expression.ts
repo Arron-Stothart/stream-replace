@@ -1,4 +1,11 @@
-import type { Boundary, Context } from './boundary.js';
+import { contains, ranges, scalar, type Range } from './alphabet.js';
+import {
+  holds,
+  observed,
+  wordCharacters,
+  type Boundary,
+  type Context,
+} from './boundary.js';
 
 export type Expression<Symbol> =
   | { readonly kind: 'empty' }
@@ -93,3 +100,22 @@ export function quantify<Symbol>(
   }
   return { kind: 'quantify', body, minimum, maximum, greedy };
 }
+
+export function codepoints(values: readonly Range[]): Expression<number> {
+  const normalized = ranges(values);
+  return {
+    kind: 'symbol',
+    accepts: (value) => scalar(value) && contains(normalized, value),
+    ranges: normalized,
+  };
+}
+
+export const boundary = (
+  kind: Boundary,
+  word: readonly Range[] = wordCharacters,
+): Expression<number> => ({
+  kind: 'assert',
+  boundary: kind,
+  ranges: observed(kind, word),
+  accepts: (context) => holds(kind, word, context),
+});

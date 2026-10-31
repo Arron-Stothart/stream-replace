@@ -1,7 +1,14 @@
 import { decode } from './decode.js';
-import { codepoints, complement, ranges, type Range } from './alphabet.js';
-import { boundary, wordCharacters, lineCharacters } from './boundary.js';
-import { capture, quantify, repeat, type Expression } from './expression.js';
+import { complement, ranges, type Range } from './alphabet.js';
+import { wordCharacters, lineCharacters } from './boundary.js';
+import {
+  boundary,
+  capture,
+  codepoints,
+  quantify,
+  repeat,
+  type Expression,
+} from './expression.js';
 
 const space: readonly Range[] = [
   [9, 13],
