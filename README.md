@@ -1,5 +1,8 @@
-# stream-replace
+# Stream Replace
 
-Library for parsing and transforming streamed text, such as LLM responses.
+Utilities for parsing and transforming streamed text.
 
-Useful for replacing markers or tags, and extracting structured events.
+Especially useful for LLM responses, where text arrives in arbitrary chunks and needs to be interpreted or transformed:
+
+- Extracting content from structural markers and emitting typed events (e.g., `<tool_call>` or `<scratch_pad>`).
+- Replacing literals or matched patterns with dynamically generated content (e.g. validating citations).
