@@ -1,5 +1,5 @@
-import { normalize, type Boundary, type Range } from './alphabet.js';
-import type { Expression } from './syntax.js';
+import { normalize, type Boundary, type Range } from './alphabet.ts';
+import type { Expression } from './syntax.ts';
 
 const MAX_INSTRUCTIONS = 65_536;
 

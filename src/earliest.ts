@@ -7,9 +7,9 @@ import {
   width,
   type Boundary,
   type Range,
-} from './alphabet.js';
-import type { Automaton } from './automaton.js';
-import { TextBuffer } from './text.js';
+} from './alphabet.ts';
+import type { Automaton } from './automaton.ts';
+import { TextBuffer } from './text.ts';
 
 const BUDGET = 2_000_000;
 

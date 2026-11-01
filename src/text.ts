@@ -3,7 +3,7 @@ import {
   isHighSurrogate,
   isLowSurrogate,
   lastAtOrBelow,
-} from './alphabet.js';
+} from './alphabet.ts';
 
 const LOOKBEHIND_UNITS = 2;
 const COMPACT_AFTER = 64;

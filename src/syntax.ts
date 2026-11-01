@@ -13,7 +13,7 @@ import {
   wordCharacters,
   type Boundary,
   type Range,
-} from './alphabet.js';
+} from './alphabet.ts';
 
 export type Expression =
   | { readonly kind: 'chars'; readonly ranges: readonly Range[] }

@@ -4,8 +4,8 @@ import {
   type Pattern,
   type Replacement,
   type ReplaceOptions,
-} from './api.js';
-import type { Segment, Session } from './output.js';
+} from './api.ts';
+import type { Segment, Session } from './output.ts';
 
 export interface MatchStreamOptions extends MatchOptions {
   readonly pattern: string | RegExp | Pattern;

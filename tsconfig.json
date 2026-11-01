@@ -12,7 +12,8 @@
     "rootDir": "src",
     "strict": true,
     "skipLibCheck": true,
-    "verbatimModuleSyntax": true
+    "verbatimModuleSyntax": true,
+    "rewriteRelativeImportExtensions": true
   },
   "include": [
     "src/**/*.ts"

@@ -4,8 +4,8 @@ import {
   holdsWithoutNext,
   width,
   type Range,
-} from './alphabet.js';
-import { firstCodePoints, type Automaton } from './automaton.js';
+} from './alphabet.ts';
+import { firstCodePoints, type Automaton } from './automaton.ts';
 
 export interface Span {
   readonly start: number;

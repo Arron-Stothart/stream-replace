@@ -1,5 +1,5 @@
-import { compile } from './automaton.js';
-import { Earliest } from './earliest.js';
+import { compile } from './automaton.ts';
+import { Earliest } from './earliest.ts';
 import {
   mapping,
   projecting,
@@ -10,8 +10,8 @@ import {
   type Projection,
   type Segment,
   type Session,
-} from './output.js';
-import { parse, type Flags } from './syntax.js';
+} from './output.ts';
+import { parse, type Flags } from './syntax.ts';
 
 export type Replacement =
   | { readonly kind: 'literal'; readonly value: string }

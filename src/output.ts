@@ -1,6 +1,6 @@
-import type { Automaton } from './automaton.js';
-import { Search, type Decisions, type Span } from './search.js';
-import { TextBuffer } from './text.js';
+import type { Automaton } from './automaton.ts';
+import { Search, type Decisions, type Span } from './search.ts';
+import { TextBuffer } from './text.ts';
 
 export interface Session<Output> {
   write(chunk: string): Output;

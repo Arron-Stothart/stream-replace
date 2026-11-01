@@ -1,10 +1,10 @@
-export { compilePattern, literal, template, mapMatch } from './api.js';
+export { compilePattern, literal, template, mapMatch } from './api.ts';
 export type {
   MatchOptions,
   Pattern,
   Replacement,
   ReplaceOptions,
-} from './api.js';
-export type { Match, Segment, Session } from './output.js';
-export { replaceInStream, matchInStream } from './stream.js';
-export type { MatchStreamOptions, ReplaceStreamOptions } from './stream.js';
+} from './api.ts';
+export type { Match, Segment, Session } from './output.ts';
+export { replaceInStream, matchInStream } from './stream.ts';
+export type { MatchStreamOptions, ReplaceStreamOptions } from './stream.ts';
