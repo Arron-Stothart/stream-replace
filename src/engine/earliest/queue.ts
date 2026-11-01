@@ -9,6 +9,7 @@ export class Queue<Value> {
   private offset = 0;
 
   fork(): Queue<Value> {
+    this.peek();
     const queue = new Queue<Value>();
     queue.front = this.front;
     queue.back = this.back;
