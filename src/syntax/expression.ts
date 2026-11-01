@@ -16,6 +16,7 @@ export type Expression =
     }
   | {
       readonly kind: 'capture';
-      readonly name: string;
+      readonly index: number;
+      readonly name: string | null;
       readonly body: Expression;
     };

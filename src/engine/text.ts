@@ -1,19 +1,31 @@
 const isHigh = (unit: number) => unit >= 0xd800 && unit <= 0xdbff;
 const isLow = (unit: number) => unit >= 0xdc00 && unit <= 0xdfff;
 
+export const width = (codePoint: number): number =>
+  codePoint > 0xffff ? 2 : 1;
+
+export function holdBack(text: string): readonly [ready: string, held: string] {
+  return text.length > 0 && isHigh(text.charCodeAt(text.length - 1))
+    ? [text.slice(0, -1), text.slice(-1)]
+    : [text, ''];
+}
+
 export class TextBuffer {
   private chunks: string[] = [];
   private offsets: number[] = [];
   private first = 0;
   private cursor = 0;
   private held = '';
-  end = 0;
+  private length = 0;
+
+  get end(): number {
+    return this.length;
+  }
 
   append(chunk: string): void {
-    const text = this.held + chunk;
-    const hold = text.length > 0 && isHigh(text.charCodeAt(text.length - 1));
-    this.held = hold ? text.slice(-1) : '';
-    this.push(hold ? text.slice(0, -1) : text);
+    const [ready, held] = holdBack(this.held + chunk);
+    this.held = held;
+    this.push(ready);
   }
 
   close(): void {
@@ -24,8 +36,8 @@ export class TextBuffer {
   private push(text: string): void {
     if (text.length === 0) return;
     this.chunks.push(text);
-    this.offsets.push(this.end);
-    this.end += text.length;
+    this.offsets.push(this.length);
+    this.length += text.length;
   }
 
   release(offset: number): void {
@@ -38,7 +50,7 @@ export class TextBuffer {
     if (first > 64 && first * 2 > this.chunks.length) {
       this.chunks = this.chunks.slice(first);
       this.offsets = this.offsets.slice(first);
-      this.cursor -= first;
+      this.cursor = Math.max(0, this.cursor - first);
       first = 0;
     }
     this.first = first;
@@ -46,11 +58,28 @@ export class TextBuffer {
   }
 
   private chunkAt(offset: number): number {
-    let index = Math.min(this.cursor, this.chunks.length - 1);
-    while (index > this.first && this.offsets[index] > offset) index--;
-    while (index < this.chunks.length - 1 && this.offsets[index + 1] <= offset)
-      index++;
-    return (this.cursor = index);
+    const { offsets } = this;
+    const last = offsets.length - 1;
+    const index = Math.min(this.cursor, last);
+    if (
+      offsets[index] <= offset &&
+      (index === last || offsets[index + 1] > offset)
+    )
+      return index;
+    if (
+      index < last &&
+      offsets[index + 1] <= offset &&
+      (index + 1 === last || offsets[index + 2] > offset)
+    )
+      return (this.cursor = index + 1);
+    let low = this.first;
+    let high = last;
+    while (low < high) {
+      const middle = (low + high + 1) >>> 1;
+      if (offsets[middle] <= offset) low = middle;
+      else high = middle - 1;
+    }
+    return (this.cursor = low);
   }
 
   private unit(offset: number): number {
@@ -58,14 +87,13 @@ export class TextBuffer {
     return this.chunks[index].charCodeAt(offset - this.offsets[index]);
   }
 
-  codePointAt(offset: number): readonly [codePoint: number, length: number] {
+  codePointAt(offset: number): number {
     const unit = this.unit(offset);
-    if (isHigh(unit) && offset + 1 < this.end) {
+    if (isHigh(unit) && offset + 1 < this.length) {
       const low = this.unit(offset + 1);
-      if (isLow(low))
-        return [0x10000 + ((unit - 0xd800) << 10) + low - 0xdc00, 2];
+      if (isLow(low)) return 0x10000 + ((unit - 0xd800) << 10) + low - 0xdc00;
     }
-    return [unit, 1];
+    return unit;
   }
 
   codePointBefore(offset: number): number | undefined {

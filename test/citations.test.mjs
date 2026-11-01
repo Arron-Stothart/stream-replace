@@ -16,8 +16,8 @@ test('streamed citations resolve sources and line locators without leaking parti
   const rendered = [];
   const replacement = mapMatch((match) => {
     rendered.push(match.text);
-    const ids = match.captures.get('sources').split('\uE202');
-    const lines = match.captures.get('lines');
+    const ids = match.groups.sources.split('\uE202');
+    const lines = match.groups.lines;
     if (ids.some((id) => !sources.has(id))) return match.text;
     return ids
       .map((id) => {

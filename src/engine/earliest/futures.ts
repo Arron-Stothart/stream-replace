@@ -1,17 +1,17 @@
 import { holds, observed, type Boundary } from '../../syntax/boundary.js';
 import { contains, MAX_CODE_POINT, type Range } from '../../syntax/charset.js';
 import type { Automaton } from '../../nfa/automaton.js';
-import type { Budget } from './graph.js';
+import type { Budget } from './budget.js';
 
-export interface Lookahead {
+export interface Futures {
   readonly atoms: readonly Range[];
-  readonly futures: number;
+  readonly count: number;
   readonly contexts: readonly number[];
   readonly successors: readonly (readonly (readonly number[])[])[];
   accepts(state: number, left: number, future: number): boolean;
 }
 
-export function lookahead(automaton: Automaton, budget: Budget): Lookahead {
+export function futures(automaton: Automaton, budget: Budget): Futures {
   const { states } = automaton;
   const width = states.length;
   const cuts = new Set([0, MAX_CODE_POINT + 1]);
@@ -50,7 +50,7 @@ export function lookahead(automaton: Automaton, budget: Budget): Lookahead {
     budget.spend(boundaries.size * following.length);
     const profile = [...boundaries]
       .flatMap((boundary) =>
-        following.map((next) => (holds(boundary, { previous, next }) ? 1 : 0)),
+        following.map((next) => (holds(boundary, previous, next) ? 1 : 0)),
       )
       .join('');
     let id = profiles.get(profile);
@@ -94,10 +94,7 @@ export function lookahead(automaton: Automaton, budget: Budget): Lookahead {
         const state = states[parent];
         if (
           state.kind !== 'assert' ||
-          holds(state.boundary, {
-            previous: representatives[left],
-            next: symbol,
-          })
+          holds(state.boundary, representatives[left], symbol)
         )
           pending.push(left * width + parent);
       }
@@ -105,30 +102,29 @@ export function lookahead(automaton: Automaton, budget: Budget): Lookahead {
     return result;
   }
 
-  const futures = [precede(undefined, 0n, 0)];
-  const ids = new Map([[futures[0], 0]]);
+  const sets = [precede(undefined, 0n, 0)];
+  const ids = new Map([[sets[0], 0]]);
   const transitions: number[][] = [];
-  for (let index = 0; index < futures.length; index++)
+  for (let index = 0; index < sets.length; index++)
     transitions[index] = atoms.map(([symbol], atom) => {
-      const reachable = precede(symbol, futures[index], contexts[atom]);
+      const reachable = precede(symbol, sets[index], contexts[atom]);
       let id = ids.get(reachable);
       if (id === undefined) {
-        id = futures.length;
+        id = sets.length;
         ids.set(reachable, id);
-        futures.push(reachable);
+        sets.push(reachable);
       }
       return id;
     });
-  const successors: number[][][] = futures.map(() => atoms.map(() => []));
+  const successors: number[][][] = sets.map(() => atoms.map(() => []));
   transitions.forEach((row, after) =>
     row.forEach((before, atom) => successors[before][atom].push(after)),
   );
   return {
     atoms,
     contexts,
-    futures: futures.length,
+    count: sets.length,
     successors,
-    accepts: (state, left, future) =>
-      (futures[future] & bit(left, state)) !== 0n,
+    accepts: (state, left, future) => (sets[future] & bit(left, state)) !== 0n,
   };
 }

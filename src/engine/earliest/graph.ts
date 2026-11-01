@@ -20,8 +20,10 @@ export interface Graph<Value> {
   }[];
 }
 
-export const label = (edge: Edge<number>, symbol: number): readonly number[] =>
-  edge.copy ? [symbol, ...edge.output] : edge.output;
+export const written = (
+  edge: Edge<number>,
+  symbol: number,
+): readonly number[] => (edge.copy ? [symbol, ...edge.output] : edge.output);
 
 export function atomOf(atoms: readonly Range[], symbol: number): number {
   let low = 0;
@@ -32,17 +34,4 @@ export function atomOf(atoms: readonly Range[], symbol: number): number {
     else high = middle - 1;
   }
   return low;
-}
-
-export class TooLarge extends Error {}
-
-export class Budget {
-  private left: number;
-  constructor(limit: number) {
-    this.left = limit;
-  }
-  spend(cost: number): void {
-    if ((this.left -= cost) < 0)
-      throw new TooLarge('Pattern analysis exceeded its budget');
-  }
 }

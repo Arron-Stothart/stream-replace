@@ -1,20 +1,20 @@
-import type { Budget, Graph } from './graph.js';
+import type { Budget } from './budget.js';
+import type { Graph } from './graph.js';
 import { onward } from './onward.js';
-import type { Mark } from './selection.js';
-
-export interface Shape {
-  readonly open: readonly number[];
-  readonly inside: boolean;
-  readonly close: readonly number[];
-}
+import type { Mark } from './marks.js';
+import type { Projection } from '../projection.js';
 
 export function project(
   marks: Graph<Mark>,
-  shape: Shape,
+  { open, inside, close }: Projection,
   budget: Budget,
 ): Graph<number> {
+  const codePoints = (text: string) =>
+    Array.from(text, (character) => character.codePointAt(0)!);
+  const opening = codePoints(open);
+  const closing = codePoints(close);
   const output = (marked: readonly Mark[]): number[] =>
-    marked.flatMap((mark) => (mark === 'open' ? shape.open : shape.close));
+    marked.flatMap((mark) => (mark === 'open' ? opening : closing));
   return onward(
     {
       atoms: marks.atoms,
@@ -27,7 +27,7 @@ export function project(
         edges: node.edges.map((edges) =>
           edges.map((edge) => ({
             target: edge.target,
-            copy: edge.copy || shape.inside,
+            copy: edge.copy || inside,
             output: output(edge.output),
           })),
         ),

@@ -1,4 +1,5 @@
-import { label, type Budget, type Edge, type Graph } from './graph.js';
+import type { Budget } from './budget.js';
+import { written, type Edge, type Graph } from './graph.js';
 
 function commonPrefix(
   left: readonly number[],
@@ -43,12 +44,12 @@ function prefixes(
     for (const { source, edge, symbol } of incoming[target]) {
       if (known.has(source)) continue;
       known.add(source);
-      result[source] = [...label(edge, symbol), ...result[target]];
+      result[source] = [...written(edge, symbol), ...result[target]];
       order.push(source);
     }
   }
   if (known.size !== nodes.length)
-    throw new Error('A replacement state cannot finish');
+    throw new Error('Internal error: a replacement state cannot finish');
 
   const queued = new Set(nodes.keys());
   const work = [...queued];
@@ -61,12 +62,12 @@ function prefixes(
       for (const edge of edges) {
         budget.spend(1);
         prefix = commonPrefix(prefix, [
-          ...label(edge, low),
+          ...written(edge, low),
           ...result[edge.target],
         ]);
         if (edge.copy && low !== high)
           prefix = commonPrefix(prefix, [
-            ...label(edge, low + 1),
+            ...written(edge, low + 1),
             ...result[edge.target],
           ]);
       }
@@ -98,7 +99,7 @@ export function onward(graph: Graph<number>, budget: Budget): Graph<number> {
           const output = copy
             ? [...edge.output, ...prefix[edge.target]]
             : [
-                ...label(edge, graph.atoms[atom][0]),
+                ...written(edge, graph.atoms[atom][0]),
                 ...prefix[edge.target],
               ].slice(prefix[index].length);
           return { target: edge.target, copy, output };

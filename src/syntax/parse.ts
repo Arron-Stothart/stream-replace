@@ -6,6 +6,7 @@ import {
   type Range,
 } from './charset.js';
 import type { Expression } from './expression.js';
+import { caseFold, property } from './unicode.js';
 
 export interface Flags {
   readonly ignoreCase: boolean;
@@ -34,34 +35,11 @@ const controls: Readonly<Record<string, number>> = {
   r: 13,
 };
 
-const tables = new Map<string, readonly Range[]>();
-
-function hostTable(pattern: string, flags: string): readonly Range[] {
-  const key = `${flags}/${pattern}`;
-  const cached = tables.get(key);
-  if (cached) return cached;
-  const test = new RegExp(`^(?:${pattern})$`, flags);
-  const result: Range[] = [];
-  let start = -1;
-  for (let value = 0; value <= MAX_CODE_POINT + 1; value++) {
-    const included =
-      value <= MAX_CODE_POINT && test.test(String.fromCodePoint(value));
-    if (included && start < 0) start = value;
-    if (!included && start >= 0) {
-      result.push([start, value - 1]);
-      start = -1;
-    }
-  }
-  tables.set(key, result);
-  return result;
-}
-
-const escape = (value: number) => `\\u{${value.toString(16)}}`;
-
 export function parse(source: string, flags: Flags): Expression {
   const input = Array.from(source);
   let position = 0;
   let groups = 0;
+  const names = new Set<string>();
   const fail = (message: string): never => {
     throw new SyntaxError(`${message} at pattern position ${position}`);
   };
@@ -74,11 +52,7 @@ export function parse(source: string, flags: Flags): Expression {
 
   function fold(values: readonly Range[]): readonly Range[] {
     const normalized = normalize(values);
-    if (!flags.ignoreCase || normalized.length === 0) return normalized;
-    const members = normalized
-      .map(([a, b]) => (a === b ? escape(a) : `${escape(a)}-${escape(b)}`))
-      .join('');
-    return hostTable(`[${members}]`, 'iu');
+    return flags.ignoreCase ? caseFold(normalized) : normalized;
   }
 
   const word = (): readonly Range[] => fold(wordCharacters);
@@ -122,7 +96,7 @@ export function parse(source: string, flags: Flags): Expression {
         !/^[A-Za-z_][A-Za-z_0-9]*(?:=[A-Za-z_][A-Za-z_0-9]*)?$/.test(name)
       )
         fail('Invalid Unicode property');
-      const values = fold(hostTable(`\\p{${name}}`, 'u'));
+      const values = fold(property(name));
       return character === 'p' ? values : complement(values);
     }
     if (character === 'x' || character === 'u') {
@@ -276,6 +250,7 @@ export function parse(source: string, flags: Flags): Expression {
   }
 
   interface Group {
+    readonly capture: number | null;
     readonly name: string | null;
     parts: Expression[];
     readonly alternatives: Expression[];
@@ -287,17 +262,20 @@ export function parse(source: string, flags: Flags): Expression {
       group.alternatives.length === 1
         ? group.alternatives[0]
         : { kind: 'choice', alternatives: group.alternatives };
-    return group.name === null
+    return group.capture === null
       ? body
-      : { kind: 'capture', name: group.name, body };
+      : { kind: 'capture', index: group.capture, name: group.name, body };
   }
 
-  const stack: Group[] = [{ name: null, parts: [], alternatives: [] }];
+  const stack: Group[] = [
+    { capture: null, name: null, parts: [], alternatives: [] },
+  ];
   while (peek() !== undefined) {
     const current = stack[stack.length - 1];
     const character = peek();
     if (character === '(') {
       take();
+      let capture: number | null = groups;
       let name: string | null = null;
       if (peek() === '?') {
         take();
@@ -307,11 +285,14 @@ export function parse(source: string, flags: Flags): Expression {
           while (peek() !== '>' && peek() !== undefined) label += take();
           if (take() !== '>' || !/^[A-Za-z_$][\w$]*$/.test(label))
             fail('Invalid capture name');
+          if (names.has(label)) fail(`Duplicate capture name ${label}`);
+          names.add(label);
           name = label;
-          groups++;
-        } else if (kind !== ':') fail('Lookaround is unsupported');
-      } else name = String(++groups);
-      stack.push({ name, parts: [], alternatives: [] });
+        } else if (kind === ':') capture = null;
+        else fail('Lookaround is unsupported');
+      }
+      if (capture !== null) groups++;
+      stack.push({ capture, name, parts: [], alternatives: [] });
     } else if (character === ')') {
       take();
       if (stack.length === 1) fail('Unmatched closing parenthesis');

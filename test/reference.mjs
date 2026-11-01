@@ -4,7 +4,7 @@ import { contains } from '../dist/syntax/charset.js';
 function names(expression) {
   switch (expression.kind) {
     case 'capture':
-      return [expression.name, ...names(expression.body)];
+      return [expression.index, ...names(expression.body)];
     case 'sequence':
       return expression.parts.flatMap(names);
     case 'choice':
@@ -29,12 +29,7 @@ export function* matches(expression, input, position = 0, captures = {}) {
         yield { position: position + 1, captures };
       return;
     case 'assert':
-      if (
-        holds(expression.boundary, {
-          previous: input[position - 1],
-          next: input[position],
-        })
-      )
+      if (holds(expression.boundary, input[position - 1], input[position]))
         yield { position, captures };
       return;
     case 'choice':
@@ -64,7 +59,7 @@ export function* matches(expression, input, position = 0, captures = {}) {
           position: next.position,
           captures: {
             ...next.captures,
-            [expression.name]: [position, next.position],
+            [expression.index]: [position, next.position],
           },
         };
       return;

@@ -1,32 +1,14 @@
-import type { Boundary } from '../syntax/boundary.js';
-import type { Range } from '../syntax/charset.js';
-import type { Instruction, Program } from './program.js';
+import type { Instruction, Program, Step } from './program.js';
 
 export type State =
+  | Step
   | { readonly kind: 'accept'; readonly progressed: boolean }
-  | {
-      readonly kind: 'consume';
-      readonly ranges: readonly Range[];
-      readonly next: number;
-    }
-  | {
-      readonly kind: 'assert';
-      readonly boundary: Boundary;
-      readonly next: number;
-    }
-  | { readonly kind: 'save'; readonly slot: number; readonly next: number }
-  | {
-      readonly kind: 'reset';
-      readonly from: number;
-      readonly to: number;
-      readonly next: number;
-    }
   | { readonly kind: 'choose'; readonly successors: readonly number[] };
 
 export interface Automaton {
   readonly entry: number;
   readonly states: readonly State[];
-  readonly captures: readonly string[];
+  readonly captures: readonly (string | null)[];
 }
 
 function successors(instruction: Instruction): readonly number[] {
@@ -83,11 +65,7 @@ export function automaton(program: Program): Automaton {
       case 'reject':
         return { kind: 'choose', successors: [] };
       case 'consume':
-        return {
-          kind: 'consume',
-          ranges: instruction.ranges,
-          next: state(instruction.next, true),
-        };
+        return { ...instruction, next: state(instruction.next, true) };
       case 'assert':
       case 'save':
       case 'reset':

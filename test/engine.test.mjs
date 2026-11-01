@@ -10,11 +10,10 @@ import {
 import { automaton } from '../dist/nfa/automaton.js';
 import { compile } from '../dist/nfa/compile.js';
 import { Scanner } from '../dist/engine/scanner.js';
-import { TextBuffer } from '../dist/engine/text.js';
-import { Budget } from '../dist/engine/earliest/graph.js';
+import { Budget } from '../dist/engine/earliest/budget.js';
+import { markMatches } from '../dist/engine/earliest/marks.js';
 import { project } from '../dist/engine/earliest/project.js';
-import { Runner } from '../dist/engine/earliest/runner.js';
-import { selection } from '../dist/engine/earliest/selection.js';
+import { Simulation } from '../dist/engine/earliest/simulation.js';
 import { parse } from '../dist/syntax/parse.js';
 import { replace, words } from './reference.mjs';
 
@@ -34,7 +33,7 @@ const star = (body, greedy = true) => ({
   maximum: Infinity,
   greedy,
 });
-const capture = (name, body) => ({ kind: 'capture', name, body });
+const capture = (index, body) => ({ kind: 'capture', index, name: null, body });
 const flags = { ignoreCase: false, multiline: false, dotAll: false };
 
 function expressions() {
@@ -48,39 +47,35 @@ function expressions() {
     choice(a, b),
     star(a, false),
     choice(empty, a),
-    choice(capture('c', a), b),
+    choice(capture(2, a), b),
   ])
     for (const greedy of [true, false])
       result.push(
         star(body, greedy),
         { kind: 'repeat', body, minimum: 1, maximum: 2, greedy },
         sequence(star(body, greedy), b),
-        capture('outer', sequence(capture('inner', star(body, greedy)), a)),
+        capture(0, sequence(capture(1, star(body, greedy)), a)),
       );
   return result;
 }
 
 function scan(machine, input, replacement) {
-  const buffer = new TextBuffer();
   const output = [];
   const calls = [];
   const sink = {
-    text: (from, to) => output.push(...input.slice(from, to)),
+    text: (text) =>
+      output.push(...Array.from(text, (unit) => unit.codePointAt(0))),
     progress() {},
-    match(match) {
-      const captures = {};
-      machine.captures.forEach((name, index) => {
-        const [start, end] = [
-          match.slots[index * 2],
-          match.slots[index * 2 + 1],
-        ];
-        if (start !== null && end !== null) captures[name] = [start, end];
+    match({ start, end, captures }) {
+      const found = {};
+      captures.forEach((text, index) => {
+        if (text !== undefined) found[index] = text;
       });
-      calls.push({ start: match.start, end: match.end, captures });
+      calls.push({ start, end, captures: found });
       output.push(...replacement);
     },
   };
-  const scanner = new Scanner(machine, buffer, sink);
+  const scanner = new Scanner(machine, sink);
   for (const value of input) scanner.write(String.fromCharCode(value));
   scanner.finish();
   return { output, calls };
@@ -88,15 +83,14 @@ function scan(machine, input, replacement) {
 
 function earliest(machine, input, replacement) {
   const graph = project(
-    selection(machine, new Budget(1e7)),
-    { open: replacement, inside: false, close: [] },
+    markMatches(machine, new Budget(1e7)),
+    { open: String.fromCodePoint(...replacement), inside: false, close: '' },
     new Budget(1e7),
   );
-  const runner = new Runner(graph);
-  const output = [];
-  runner.agree(output);
-  for (const value of input) runner.read(value, output);
-  runner.finish(output);
+  const simulation = new Simulation(graph);
+  const output = simulation.start();
+  for (const value of input) simulation.read(value, output);
+  simulation.finish(output);
   return output;
 }
 
@@ -107,7 +101,10 @@ test('both engines implement the independent ordered-expression semantics', () =
       for (const input of words([97, 98], 3)) {
         const calls = [];
         const expected = replace(expression, input, (match) => {
-          calls.push(match);
+          const captures = {};
+          for (const [index, [start, end]] of Object.entries(match.captures))
+            captures[index] = String.fromCharCode(...input.slice(start, end));
+          calls.push({ start: match.start, end: match.end, captures });
           return replacement;
         });
         const scanned = scan(machine, input, replacement);
@@ -169,7 +166,7 @@ test('text results and callback spans are independent of UTF-16 chunk partitions
         expected,
         input.replace(
           /./gsu,
-          replacement.kind === 'callback'
+          replacement.kind === 'map'
             ? (text, start) => `${start}:${text}`
             : replacement.kind === 'literal'
               ? 'X'
@@ -250,7 +247,7 @@ test('sessions reject reentrancy and remain closed after failure or EOF', () => 
     () => failed.write('a'),
     (value) => value === error,
   );
-  assert.throws(() => failed.finish(), /closed/);
+  assert.throws(() => failed.finish(), /finished|failed/);
   let reentrant;
   reentrant = compilePattern('a').replacer(
     mapMatch(() => {
@@ -260,7 +257,7 @@ test('sessions reject reentrancy and remain closed after failure or EOF', () => 
   );
   assert.equal(reentrant.write('a'), 'X');
   reentrant.finish();
-  assert.throws(() => reentrant.write(''), /closed/);
+  assert.throws(() => reentrant.write(''), /finished|failed/);
 });
 
 test('the exported Web Stream transform executes the built package', async () => {
@@ -329,7 +326,7 @@ test('pattern nesting does not consume the JavaScript call stack', () => {
   const depth = 4000;
   const pattern = compilePattern('('.repeat(depth) + 'a' + ')'.repeat(depth));
   const stream = pattern.replacer(
-    mapMatch((match) => `${match.groups.length}:${match.text}`),
+    mapMatch((match) => `${match.captures.length}:${match.text}`),
   );
   assert.equal(stream.write('a') + stream.finish(), `${depth}:a`);
 });

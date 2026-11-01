@@ -1,186 +1,277 @@
 import { holds, holdsBefore } from '../syntax/boundary.js';
-import { contains } from '../syntax/charset.js';
+import { contains, normalize, type Range } from '../syntax/charset.js';
 import type { Automaton } from '../nfa/automaton.js';
 
-interface Saved {
-  readonly slot: number;
-  readonly position: number | null;
-  readonly previous: Saved | null;
-}
+export const END = -1;
+export const UNKNOWN = -2;
 
-interface Thread {
-  readonly state: number;
-  readonly start: number;
-  readonly saved: Saved | null;
-}
-
-interface Candidate {
+export interface Span {
   readonly start: number;
   readonly end: number;
-  readonly saved: Saved | null;
 }
 
-export interface Acceptance {
-  readonly start: number;
-  readonly end: number;
-  readonly slots: readonly (number | null)[];
+export interface Accepted extends Span {
+  readonly captures: readonly (Span | null)[];
 }
 
-export type Lookahead =
-  | { readonly kind: 'symbol'; readonly symbol: number }
-  | { readonly kind: 'end' }
-  | { readonly kind: 'unknown' };
+export type Status = 'blocked' | 'matched' | 'searching';
+
+type Slots = Float64Array;
+
+const UNSET = -1;
+
+function firstCodePoints(automaton: Automaton): readonly Range[] | null {
+  const ranges: Range[] = [];
+  const seen = new Set<number>();
+  const pending = [automaton.entry];
+  while (pending.length > 0) {
+    const index = pending.pop()!;
+    if (seen.has(index)) continue;
+    seen.add(index);
+    const state = automaton.states[index];
+    switch (state.kind) {
+      case 'accept':
+      case 'assert':
+        return null;
+      case 'consume':
+        for (const range of state.ranges) ranges.push(range);
+        break;
+      case 'save':
+      case 'reset':
+        pending.push(state.next);
+        break;
+      case 'choose':
+        for (const successor of state.successors) pending.push(successor);
+        break;
+    }
+  }
+  return normalize(ranges);
+}
+
+class Threads {
+  readonly state: Int32Array;
+  readonly start: Float64Array;
+  readonly slots: Slots[];
+  length = 0;
+
+  constructor(capacity: number) {
+    this.state = new Int32Array(capacity);
+    this.start = new Float64Array(capacity);
+    this.slots = new Array<Slots>(capacity);
+  }
+
+  push(state: number, start: number, slots: Slots): void {
+    const index = this.length++;
+    this.state[index] = state;
+    this.start[index] = start;
+    this.slots[index] = slots;
+  }
+}
 
 export class Vm {
   private readonly automaton: Automaton;
-  private threads: Thread[] = [];
+  private readonly first: readonly Range[] | null;
+  private readonly empty: Slots;
+  private threads: Threads;
+  private spare: Threads;
   private expanded = false;
-  private current: Candidate | null = null;
+  private candidate: { start: number; end: number; slots: Slots } | null = null;
   private at = 0;
   private origin = 0;
   private readonly visited: Int32Array;
-  private expansions = 0;
-  private readonly failed = new Map<number, Set<number>>();
+  private stamp = 0;
+  private readonly failed = new Map<number, number[]>();
   private readonly trail = new Map<number, number[]>();
+  private readonly stack = {
+    state: [] as number[],
+    start: [] as number[],
+    slots: [] as Slots[],
+  };
 
   constructor(automaton: Automaton) {
     this.automaton = automaton;
-    this.visited = new Int32Array(automaton.states.length);
+    this.first = firstCodePoints(automaton);
+    const states = automaton.states.length;
+    this.empty = new Float64Array(automaton.captures.length * 2).fill(UNSET);
+    this.threads = new Threads(states);
+    this.spare = new Threads(states);
+    this.visited = new Int32Array(states);
   }
 
   get position(): number {
     return this.at;
   }
 
-  get settled(): boolean {
-    return this.expanded && this.current !== null && this.threads.length === 0;
-  }
-
   get frontier(): number {
-    return this.threads[0]?.start ?? this.current?.start ?? this.at;
+    if (this.threads.length > 0) return this.threads.start[0];
+    return this.candidate?.start ?? this.at;
   }
 
-  get certain(): { readonly start: number; readonly end: number } | null {
-    const candidate = this.current;
+  get certainEnd(): number {
+    const candidate = this.candidate;
     return candidate !== null && this.frontier === candidate.start
-      ? candidate
-      : null;
+      ? candidate.end
+      : -1;
   }
 
-  accepted(): Acceptance {
-    const { start, end, saved } = this.current!;
-    const slots: (number | null | undefined)[] = Array(
-      this.automaton.captures.length * 2,
-    ).fill(undefined);
-    for (let entry = saved; entry !== null; entry = entry.previous)
-      if (slots[entry.slot] === undefined) slots[entry.slot] = entry.position;
-    return { start, end, slots: slots.map((slot) => slot ?? null) };
+  accepted(): Accepted {
+    const { start, end, slots } = this.candidate!;
+    const captures: (Span | null)[] = [];
+    for (let slot = 0; slot < slots.length; slot += 2)
+      captures.push(
+        slots[slot] === UNSET || slots[slot + 1] === UNSET
+          ? null
+          : { start: slots[slot], end: slots[slot + 1] },
+      );
+    return { start, end, captures };
   }
 
   restart(position: number): void {
     for (const [at, states] of this.trail) {
-      let known = this.failed.get(at);
-      if (known === undefined) this.failed.set(at, (known = new Set()));
-      for (const state of states) known.add(state);
+      const known = this.failed.get(at);
+      if (known === undefined) this.failed.set(at, states);
+      else for (const state of states) known.push(state);
     }
     this.trail.clear();
     for (let at = this.origin; at < position; at++) this.failed.delete(at);
-    this.threads = [];
+    this.threads.length = 0;
     this.expanded = false;
-    this.current = null;
+    this.candidate = null;
     this.origin = this.at = position;
   }
 
-  expand(previous: number | undefined, next: Lookahead): boolean {
-    if (this.expanded) return true;
-    const { states, entry } = this.automaton;
-    const at = this.at;
-    const context = {
-      previous,
-      next: next.kind === 'symbol' ? next.symbol : undefined,
-    };
-    const seeds =
-      this.current === null
-        ? [...this.threads, { state: entry, start: at, saved: null }]
-        : this.threads;
-    const failed = this.failed.get(at);
-    const recording = this.current !== null;
-    const expanded: number[] = [];
-    const ready: Thread[] = [];
-    let accepted: Candidate | null = null;
-    const stamp = ++this.expansions;
-    const stack: Thread[] = [];
+  advance(previous: number | undefined, next: number, width: number): Status {
+    if (
+      this.first !== null &&
+      next >= 0 &&
+      this.threads.length === 0 &&
+      this.candidate === null &&
+      !contains(this.first, next)
+    ) {
+      this.at += width;
+      this.expanded = false;
+      return 'searching';
+    }
+    if (!this.expanded) {
+      if (!this.expand(previous, next)) return 'blocked';
+      this.expanded = true;
+    }
+    if (next === END) this.threads.length = 0;
+    else if (next !== UNKNOWN) this.step(next, width);
+    return this.candidate !== null && this.threads.length === 0
+      ? 'matched'
+      : 'searching';
+  }
 
-    search: for (const seed of seeds) {
-      stack.push(seed);
-      while (stack.length > 0) {
-        const thread = stack.pop()!;
-        if (this.visited[thread.state] === stamp || failed?.has(thread.state))
-          continue;
-        this.visited[thread.state] = stamp;
-        if (recording) expanded.push(thread.state);
-        const state = states[thread.state];
+  private expand(previous: number | undefined, next: number): boolean {
+    const { states, entry } = this.automaton;
+    const { visited, stack } = this;
+    const seeds = this.threads;
+    const ready = this.spare;
+    const at = this.at;
+    const following = next < 0 ? undefined : next;
+    const expanded: number[] | null = this.candidate !== null ? [] : null;
+    const stamp = ++this.stamp;
+    const dead = this.failed.get(at);
+    if (dead !== undefined) for (const state of dead) visited[state] = stamp;
+    ready.length = 0;
+    let accepted: { start: number; end: number; slots: Slots } | null = null;
+
+    const seedCount = seeds.length + (this.candidate === null ? 1 : 0);
+    search: for (let seed = 0; seed < seedCount; seed++) {
+      if (seed < seeds.length) {
+        stack.state.push(seeds.state[seed]);
+        stack.start.push(seeds.start[seed]);
+        stack.slots.push(seeds.slots[seed]);
+      } else {
+        stack.state.push(entry);
+        stack.start.push(at);
+        stack.slots.push(this.empty);
+      }
+      while (stack.state.length > 0) {
+        const index = stack.state.pop()!;
+        const start = stack.start.pop()!;
+        const slots = stack.slots.pop()!;
+        if (visited[index] === stamp) continue;
+        visited[index] = stamp;
+        expanded?.push(index);
+        const state = states[index];
         switch (state.kind) {
           case 'accept':
-            accepted = { start: thread.start, end: at, saved: thread.saved };
+            accepted = { start, end: at, slots };
             break search;
           case 'consume':
-            ready.push(thread);
-            break;
+            ready.push(index, start, slots);
+            continue;
           case 'assert': {
             const passes =
-              next.kind === 'unknown'
+              next === UNKNOWN
                 ? holdsBefore(state.boundary, previous)
-                : holds(state.boundary, context);
-            if (passes === undefined) return false;
-            if (passes) stack.push({ ...thread, state: state.next });
-            break;
+                : holds(state.boundary, previous, following);
+            if (passes === undefined) {
+              stack.state.length = stack.start.length = stack.slots.length = 0;
+              return false;
+            }
+            if (passes) this.push(state.next, start, slots);
+            continue;
           }
-          case 'save':
-            stack.push({
-              state: state.next,
-              start: thread.start,
-              saved: { slot: state.slot, position: at, previous: thread.saved },
-            });
-            break;
+          case 'save': {
+            const written = slots.slice();
+            written[state.slot] = at;
+            this.push(state.next, start, written);
+            continue;
+          }
           case 'reset': {
-            let saved = thread.saved;
+            let cleared = slots;
             for (let slot = state.from; slot < state.to; slot++)
-              saved = { slot, position: null, previous: saved };
-            stack.push({ state: state.next, start: thread.start, saved });
-            break;
+              if (slots[slot] !== UNSET) {
+                (cleared = slots.slice()).fill(UNSET, state.from, state.to);
+                break;
+              }
+            this.push(state.next, start, cleared);
+            continue;
           }
           case 'choose':
-            for (let index = state.successors.length - 1; index >= 0; index--)
-              stack.push({ ...thread, state: state.successors[index] });
-            break;
+            for (
+              let successor = state.successors.length - 1;
+              successor >= 0;
+              successor--
+            )
+              this.push(state.successors[successor], start, slots);
+            continue;
         }
       }
     }
+    stack.state.length = stack.start.length = stack.slots.length = 0;
 
     if (accepted !== null) {
-      this.current = accepted;
+      this.candidate = accepted;
       this.trail.clear();
-    } else if (recording) this.trail.set(at, expanded);
+    } else if (expanded !== null) this.trail.set(at, expanded);
+    this.spare = seeds;
     this.threads = ready;
-    this.expanded = true;
     return true;
   }
 
-  step(symbol: number, width: number): void {
+  private push(state: number, start: number, slots: Slots): void {
+    this.stack.state.push(state);
+    this.stack.start.push(start);
+    this.stack.slots.push(slots);
+  }
+
+  private step(symbol: number, width: number): void {
     const { states } = this.automaton;
-    const following: Thread[] = [];
-    for (const thread of this.threads) {
-      const state = states[thread.state];
+    const ready = this.threads;
+    const following = this.spare;
+    following.length = 0;
+    for (let index = 0; index < ready.length; index++) {
+      const state = states[ready.state[index]];
       if (state.kind === 'consume' && contains(state.ranges, symbol))
-        following.push({ ...thread, state: state.next });
+        following.push(state.next, ready.start[index], ready.slots[index]);
     }
+    this.spare = ready;
     this.threads = following;
     this.expanded = false;
     this.at += width;
-  }
-
-  halt(): void {
-    this.threads = [];
   }
 }

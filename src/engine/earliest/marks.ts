@@ -1,23 +1,24 @@
 import type { Automaton } from '../../nfa/automaton.js';
 import { contains } from '../../syntax/charset.js';
-import type { Budget, Edge, Graph } from './graph.js';
-import { lookahead } from './lookahead.js';
+import type { Budget } from './budget.js';
+import type { Edge, Graph } from './graph.js';
+import { futures as analyse } from './futures.js';
 
 export type Mark = 'open' | 'close';
 
-export function selection(automaton: Automaton, budget: Budget): Graph<Mark> {
+export function markMatches(automaton: Automaton, budget: Budget): Graph<Mark> {
   const { entry, states } = automaton;
-  const future = lookahead(automaton, budget);
+  const future = analyse(automaton, budget);
   const nodes: {
     state: number | null;
     future: number;
     final: boolean;
     edges: Edge<Mark>[][];
   }[] = [];
-  const ids = new Map<string, number>();
+  const ids = new Map<number, number>();
 
   function node(state: number | null, guess: number): number {
-    const key = `${state}:${guess}`;
+    const key = (state === null ? 0 : state + 1) * future.count + guess;
     let id = ids.get(key);
     if (id === undefined) {
       budget.spend(future.atoms.length);
@@ -65,7 +66,9 @@ export function selection(automaton: Automaton, budget: Budget): Graph<Mark> {
             future.accepts(successor, left, guess),
           );
           if (viable === undefined)
-            throw new Error('A settled path reached a dead end');
+            throw new Error(
+              'Internal error: a settled path reached a dead end',
+            );
           state = viable;
           break;
         }
@@ -73,14 +76,14 @@ export function selection(automaton: Automaton, budget: Budget): Graph<Mark> {
     }
   }
 
-  const initial = Array.from({ length: future.futures }, (_, guess) =>
+  const initial = Array.from({ length: future.count }, (_, guess) =>
     settle(null, guess, 0),
   );
   for (let index = 0; index < nodes.length; index++) {
     const source = nodes[index];
     const current = source.state === null ? null : states[source.state];
     if (current !== null && current.kind !== 'consume')
-      throw new Error('Unsettled selection node');
+      throw new Error('Internal error: an unsettled node');
     future.atoms.forEach((range, atom) => {
       if (current !== null && !contains(current.ranges, range[0])) return;
       for (const guess of future.successors[source.future][atom]) {

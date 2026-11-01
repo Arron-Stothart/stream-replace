@@ -8,11 +8,6 @@ export type Boundary =
       readonly word: readonly Range[];
     };
 
-export interface Context {
-  readonly previous: number | undefined;
-  readonly next: number | undefined;
-}
-
 export const wordCharacters: readonly Range[] = [
   [48, 57],
   [65, 90],
@@ -31,7 +26,8 @@ const within = (set: readonly Range[], value: number | undefined): boolean =>
 
 export function holds(
   boundary: Boundary,
-  { previous, next }: Context,
+  previous: number | undefined,
+  next: number | undefined,
 ): boolean {
   switch (boundary.kind) {
     case 'start':
@@ -57,7 +53,7 @@ export function holdsBefore(
   switch (boundary.kind) {
     case 'start':
     case 'line-start':
-      return holds(boundary, { previous, next: undefined });
+      return holds(boundary, previous, undefined);
     default:
       return undefined;
   }

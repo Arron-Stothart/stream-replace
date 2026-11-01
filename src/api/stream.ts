@@ -1,10 +1,10 @@
+import type { Segment } from './match.js';
 import {
   compilePattern,
   type Pattern,
   type ReplaceOptions,
-  type TextEvent,
 } from './pattern.js';
-import type { TextReplacement } from './replacement.js';
+import type { Replacement } from './replacement.js';
 import type { Session } from './session.js';
 
 export interface MatchStreamOptions {
@@ -14,14 +14,14 @@ export interface MatchStreamOptions {
 
 export interface ReplaceStreamOptions
   extends MatchStreamOptions, ReplaceOptions {
-  readonly replacement: TextReplacement;
+  readonly replacement: Replacement;
 }
 
 function resolve({ pattern, flags }: MatchStreamOptions): Pattern {
   if (typeof pattern === 'string' || pattern instanceof RegExp)
     return compilePattern(pattern, flags);
   if (flags !== undefined)
-    throw new TypeError('Pass flags only with a string pattern');
+    throw new TypeError('A compiled pattern already has its flags');
   return pattern;
 }
 
@@ -50,5 +50,5 @@ export const replaceInStream = (
 
 export const matchInStream = (
   options: MatchStreamOptions,
-): TransformStream<string, TextEvent> =>
-  transform(resolve(options).matcher(), (events) => events);
+): TransformStream<string, Segment> =>
+  transform(resolve(options).matcher(), (segments) => segments);

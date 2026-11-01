@@ -4,16 +4,16 @@ export interface Session<Output> {
 }
 
 export function guard<Output>(inner: Session<Output>): Session<Output> {
-  let status: 'ready' | 'running' | 'closed' = 'ready';
+  let status: 'ready' | 'running' | 'finished' | 'failed' = 'ready';
   function run(final: boolean, operation: () => Output): Output {
-    if (status !== 'ready') throw new Error(`Stream is ${status}`);
+    if (status !== 'ready') throw new TypeError(`The session is ${status}`);
     status = 'running';
     try {
       const output = operation();
-      status = final ? 'closed' : 'ready';
+      status = final ? 'finished' : 'ready';
       return output;
     } catch (error) {
-      status = 'closed';
+      status = 'failed';
       throw error;
     }
   }

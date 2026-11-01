@@ -1,51 +1,40 @@
 import type { Expression } from '../syntax/expression.js';
 import type { Instruction, Program } from './program.js';
 
-function numberCaptures(root: Expression): {
-  readonly names: readonly string[];
-  readonly index: ReadonlyMap<string, number>;
-  readonly inside: ReadonlyMap<Expression, readonly [number, number]>;
-} {
-  const names: string[] = [];
-  const index = new Map<string, number>();
-  const inside = new Map<Expression, readonly [number, number]>();
-  const pending: (
-    | Expression
-    | { readonly leave: Expression; readonly from: number }
-  )[] = [root];
+function capturesIn(root: Expression): Map<number, string | null> {
+  const found = new Map<number, string | null>();
+  const pending = [root];
   while (pending.length > 0) {
-    const item = pending.pop()!;
-    if ('leave' in item) {
-      inside.set(item.leave, [item.from, names.length]);
-      continue;
-    }
-    pending.push({ leave: item, from: names.length });
-    switch (item.kind) {
+    const expression = pending.pop()!;
+    switch (expression.kind) {
       case 'capture':
-        if (index.has(item.name))
-          throw new SyntaxError(`Duplicate capture name: ${item.name}`);
-        index.set(item.name, names.push(item.name) - 1);
-        pending.push(item.body);
+        found.set(expression.index, expression.name);
+        pending.push(expression.body);
         break;
       case 'sequence':
-        for (let index = item.parts.length - 1; index >= 0; index--)
-          pending.push(item.parts[index]);
+        for (const part of expression.parts) pending.push(part);
         break;
       case 'choice':
-        for (let index = item.alternatives.length - 1; index >= 0; index--)
-          pending.push(item.alternatives[index]);
+        for (const alternative of expression.alternatives)
+          pending.push(alternative);
         break;
       case 'repeat':
-        pending.push(item.body);
+        pending.push(expression.body);
         break;
     }
   }
-  return { names, index, inside };
+  return found;
 }
 
 export function compile(expression: Expression): Program {
-  const { names, index, inside } = numberCaptures(expression);
   const instructions: Instruction[] = [];
+  const named = capturesIn(expression);
+  let count = 0;
+  for (const index of named.keys()) count = Math.max(count, index + 1);
+  const captures = Array.from(
+    { length: count },
+    (_, index) => named.get(index) ?? null,
+  );
   const emit = (instruction: Instruction): number =>
     instructions.push(instruction) - 1;
 
@@ -56,10 +45,15 @@ export function compile(expression: Expression): Program {
     next: number,
   ): Generator<Request, number, number> {
     const entry = yield [body, next];
-    const [from, to] = inside.get(body)!;
-    return from === to
-      ? entry
-      : emit({ kind: 'reset', from: from * 2, to: to * 2, next: entry });
+    const inside = [...capturesIn(body).keys()];
+    if (inside.length === 0) return entry;
+    const from = inside.reduce((low, index) => Math.min(low, index));
+    return emit({
+      kind: 'reset',
+      from: from * 2,
+      to: (from + inside.length) * 2,
+      next: entry,
+    });
   }
 
   function* optional(
@@ -124,7 +118,7 @@ export function compile(expression: Expression): Program {
         return entry;
       }
       case 'capture': {
-        const slot = index.get(expression.name)! * 2;
+        const slot = expression.index * 2;
         const end = emit({ kind: 'save', slot: slot + 1, next });
         return emit({ kind: 'save', slot, next: yield [expression.body, end] });
       }
@@ -147,5 +141,5 @@ export function compile(expression: Expression): Program {
       resumed = false;
     }
   }
-  return { entry, instructions, captures: names };
+  return { entry, instructions, captures };
 }
