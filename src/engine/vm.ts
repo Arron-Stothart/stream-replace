@@ -171,6 +171,10 @@ export class Vm {
     const at = this.at;
     const following = next < 0 ? undefined : next;
     const expanded: number[] | null = this.candidate !== null ? [] : null;
+    if (this.stamp === 0x7fffffff) {
+      visited.fill(0);
+      this.stamp = 0;
+    }
     const stamp = ++this.stamp;
     const dead = this.failed.get(at);
     if (dead !== undefined) for (const state of dead) visited[state] = stamp;
