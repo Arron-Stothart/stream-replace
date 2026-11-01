@@ -1,5 +1,5 @@
-# regex-stream-transform
+# stream-replace
 
-Find and replace for streamed text with no unnecessary buffering.
+Library for parsing and transforming streamed text, such as LLM responses.
 
-Useful for replacing markers, or extracting structured events from LLM responses.
+Useful for replacing markers or tags, and extracting structured events.
