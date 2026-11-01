@@ -61,8 +61,7 @@ export function parse(source: string, flags: Flags): Expression {
     let text = '';
     if (length === null) {
       while (peek() !== '}' && peek() !== undefined) text += take();
-      if (take() !== '}' || text.length === 0 || text.length > 6)
-        fail('Invalid Unicode escape');
+      if (take() !== '}' || text.length === 0) fail('Invalid Unicode escape');
     } else for (let index = 0; index < length; index++) text += take() ?? '';
     if (
       !/^[\da-f]+$/i.test(text) ||
@@ -96,7 +95,7 @@ export function parse(source: string, flags: Flags): Expression {
         !/^[A-Za-z_][A-Za-z_0-9]*(?:=[A-Za-z_][A-Za-z_0-9]*)?$/.test(name)
       )
         fail('Invalid Unicode property');
-      const values = fold(property(name));
+      const values = property(name);
       return character === 'p' ? values : complement(values);
     }
     if (character === 'x' || character === 'u') {
@@ -283,13 +282,18 @@ export function parse(source: string, flags: Flags): Expression {
         if (kind === '<' && peek() !== '=' && peek() !== '!') {
           let label = '';
           while (peek() !== '>' && peek() !== undefined) label += take();
-          if (take() !== '>' || !/^[A-Za-z_$][\w$]*$/.test(label))
+          if (
+            take() !== '>' ||
+            !/^[\p{ID_Start}$_][\p{ID_Continue}$\u200c\u200d]*$/u.test(label)
+          )
             fail('Invalid capture name');
           if (names.has(label)) fail(`Duplicate capture name ${label}`);
           names.add(label);
           name = label;
         } else if (kind === ':') capture = null;
-        else fail('Lookaround is unsupported');
+        else if (kind === '=' || kind === '!' || kind === '<')
+          fail('Lookaround is unsupported');
+        else fail('Unsupported group syntax');
       }
       if (capture !== null) groups++;
       stack.push({ capture, name, parts: [], alternatives: [] });
