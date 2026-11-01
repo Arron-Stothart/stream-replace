@@ -3,7 +3,7 @@ import { slots, type Saved } from './capture.js';
 import { label, type Graph } from './graph.js';
 import type { Acceptance } from './program.js';
 import { Queue } from './queue.js';
-import { match, type Match } from './replace.js';
+import { appendText, match, type EventBuffer, type Matcher } from './events.js';
 import type { Mark } from './selection.js';
 import { session, type Session } from './session.js';
 
@@ -105,11 +105,10 @@ function same(left: Item, right: Item): boolean {
   );
 }
 
-export function settledReplacer(
+export function settledMatcher(
   selected: Graph<Mark>,
   names: readonly string[],
-  replacement: (match: Match<number>) => Iterable<number>,
-): Session<Iterable<number>, number[]> {
+): Matcher<number> {
   const input = new Map<number, number>();
   let received = 0;
   let released = 0;
@@ -160,19 +159,19 @@ export function settledReplacer(
     while (released < next) input.delete(released++);
   }
 
-  function emit(output: number[]): void {
+  function emit(events: EventBuffer<number>): void {
     agree(
       runs.map((run) => run.items),
       same,
       (item) => {
         if (item.kind === 'text') {
-          output.push(input.get(item.position)!);
+          appendText(events, item.position, input.get(item.position)!);
           release(item.position + 1);
         } else {
-          for (const symbol of replacement(
-            match(item.acceptance, input, names),
-          ))
-            output.push(symbol);
+          events.push({
+            kind: 'match',
+            match: match(item.acceptance, input, names),
+          });
           release(item.acceptance.end);
         }
       },
@@ -181,8 +180,8 @@ export function settledReplacer(
 
   return session(
     (symbols) => {
-      const output: number[] = [];
-      emit(output);
+      const events: EventBuffer<number> = [];
+      emit(events);
       for (const value of symbols) {
         const symbol = validate(value);
         input.set(received++, symbol);
@@ -194,15 +193,15 @@ export function settledReplacer(
           }
         }
         runs = next;
-        emit(output);
+        emit(events);
       }
-      return output;
+      return events;
     },
     () => {
       runs = runs.filter((run) => selected.nodes[run.node].final);
-      const output: number[] = [];
-      emit(output);
-      return output;
+      const events: EventBuffer<number> = [];
+      emit(events);
+      return events;
     },
   );
 }

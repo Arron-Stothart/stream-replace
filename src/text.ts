@@ -1,15 +1,26 @@
 import { compile } from './compile.js';
 import { Decoder, decode, encode } from './decode.js';
-import { exactReplacer, settledReplacer } from './exact.js';
+import type { Event, Match, Matcher } from './events.js';
+import { exactReplacer, settledMatcher } from './exact.js';
+import type { Graph } from './graph.js';
 import { parse } from './parse.js';
 import type { Program } from './program.js';
-import type { Match } from './replace.js';
 import { selection, type Mark } from './selection.js';
 import { session, type Session } from './session.js';
-import { compileTemplate } from './template.js';
 import type { TextMatch, TextReplacement } from './substitution.js';
-import type { Graph } from './graph.js';
-import { project } from './transducer.js';
+import { compileTemplate } from './template.js';
+import { literalProjection, project, type Projection } from './transducer.js';
+
+export type TextEvent =
+  | {
+      readonly kind: 'text';
+      readonly text: string;
+      readonly start: number;
+      readonly end: number;
+    }
+  | { readonly kind: 'match'; readonly match: TextMatch };
+
+export type TextMatcher = Session<string, TextEvent[]>;
 
 export interface TextReplacer extends Session<string, string> {
   readonly emission: 'earliest' | 'after-match';
@@ -17,16 +28,20 @@ export interface TextReplacer extends Session<string, string> {
 
 export interface Pattern {
   readonly program: Program<number>;
+  matcher(): TextMatcher;
   replacer(replacement: TextReplacement): TextReplacer;
 }
 
-export interface TextOptions {
+export interface MatchOptions {
   readonly pattern: string | RegExp | Pattern;
-  readonly replacement: TextReplacement;
   readonly flags?: string;
 }
 
-function textMatch(match: Match<number>): TextMatch {
+export interface TextOptions extends MatchOptions {
+  readonly replacement: TextReplacement;
+}
+
+function textMatch(match: Match<number>, start: number): TextMatch {
   const captures = new Map<string, string | undefined>();
   for (const [name, span] of match.captures) {
     captures.set(
@@ -41,22 +56,70 @@ function textMatch(match: Match<number>): TextMatch {
           ),
     );
   }
+  const text = encode(match.symbols);
   return {
-    text: encode(match.symbols),
+    text,
     groups: [...captures.values()],
     captures,
-    start: match.start,
-    end: match.end,
+    start,
+    end: start + text.length,
   };
 }
 
-function textReplacer(
-  processor: Session<Iterable<number>, number[]>,
-  emission: 'earliest' | 'after-match',
-): TextReplacer {
+function textMatcher(matches: Matcher<number>): TextMatcher {
   const decoder = new Decoder();
+  let offset = 0;
+
+  function convert(events: readonly Event<number>[]): TextEvent[] {
+    return events.map((event): TextEvent => {
+      const start = offset;
+      if (event.kind === 'text') {
+        const text = encode(event.symbols);
+        offset += text.length;
+        return { kind: 'text', text, start, end: offset };
+      }
+      const match = textMatch(event.match, start);
+      offset = match.end;
+      return { kind: 'match', match };
+    });
+  }
+
+  return session(
+    (chunk: string) => convert(matches.write(decoder.write(chunk))),
+    () => [
+      ...convert(matches.write(decoder.finish())),
+      ...convert(matches.finish()),
+    ],
+  );
+}
+
+function mapped(
+  matches: TextMatcher,
+  apply: (match: TextMatch) => string,
+): TextReplacer {
+  const render = (events: readonly TextEvent[]): string =>
+    events
+      .map((event) => {
+        if (event.kind === 'text') return event.text;
+        const output = apply(event.match);
+        decode(output);
+        return output;
+      })
+      .join('');
   return {
-    emission,
+    emission: 'after-match',
+    ...session(
+      (chunk: string) => render(matches.write(chunk)),
+      () => render(matches.finish()),
+    ),
+  };
+}
+
+function projected(machine: Graph<number>): TextReplacer {
+  const decoder = new Decoder();
+  const processor = exactReplacer(machine);
+  return {
+    emission: 'earliest',
     ...session(
       (chunk: string) => encode(processor.write(decoder.write(chunk))),
       () =>
@@ -69,44 +132,46 @@ export function compilePattern(source: string, flags = ''): Pattern {
   const program = compile(parse(source, flags));
   let selected: Graph<Mark> | undefined;
   const selectionGraph = (): Graph<Mark> => (selected ??= selection(program));
-  const literals = new Map<string, Graph<number>>();
-  const settled = (
-    replacement: (match: Match<number>) => Iterable<number>,
-  ): TextReplacer =>
-    textReplacer(
-      settledReplacer(selectionGraph(), program.captures, replacement),
-      'after-match',
-    );
+  const projections = new Map<string, Graph<number>>();
+
+  function projection(projection: Projection): TextReplacer {
+    const key = JSON.stringify(projection);
+    let machine = projections.get(key);
+    if (machine === undefined) {
+      machine = project(selectionGraph(), projection);
+      projections.set(key, machine);
+    }
+    return projected(machine);
+  }
+
+  const matcher = (): TextMatcher =>
+    textMatcher(settledMatcher(selectionGraph(), program.captures));
+
   return {
     program,
+    matcher,
     replacer(replacement) {
-      if (replacement.kind === 'callback')
-        return settled((match) => decode(replacement.apply(textMatch(match))));
-      if (replacement.kind === 'template' && replacement.source === '$&') {
-        return textReplacer(
-          { write: (symbols) => [...symbols], finish: () => [] },
-          'earliest',
-        );
+      switch (replacement.kind) {
+        case 'callback':
+          return mapped(matcher(), replacement.apply);
+        case 'literal':
+          return projection(literalProjection(decode(replacement.value)));
+        case 'template': {
+          const compiled = compileTemplate(
+            replacement.source,
+            program.captures,
+          );
+          return compiled.kind === 'projection'
+            ? projection(compiled.projection)
+            : mapped(matcher(), compiled.apply);
+        }
       }
-      const parsed =
-        replacement.kind === 'literal'
-          ? decode(replacement.value)
-          : compileTemplate(replacement.source, program.captures);
-      if (typeof parsed === 'function') return settled(parsed);
-      const symbols = [...parsed];
-      const key = encode(symbols);
-      let machine = literals.get(key);
-      if (machine === undefined) {
-        machine = project(selectionGraph(), symbols);
-        literals.set(key, machine);
-      }
-      return textReplacer(exactReplacer(machine), 'earliest');
     },
   };
 }
 
 export function resolvePattern(
-  input: TextOptions['pattern'],
+  input: MatchOptions['pattern'],
   flags = '',
 ): Pattern {
   if (typeof input === 'string') return compilePattern(input, flags);
@@ -117,20 +182,38 @@ export function resolvePattern(
     : input;
 }
 
-export function replaceInStream({
+function streamOf<Output, Chunk>(
+  processor: Session<string, Output>,
+  chunks: (output: Output) => readonly Chunk[],
+): Transformer<string, Chunk> {
+  const enqueue = (
+    output: Output,
+    controller: TransformStreamDefaultController<Chunk>,
+  ): void => {
+    for (const chunk of chunks(output)) controller.enqueue(chunk);
+  };
+  return {
+    transform: (chunk, controller) =>
+      enqueue(processor.write(chunk), controller),
+    flush: (controller) => enqueue(processor.finish(), controller),
+  };
+}
+
+export const replaceInStream = ({
   pattern,
   replacement,
   flags = '',
-}: TextOptions): TransformStream<string, string> {
-  const processor = resolvePattern(pattern, flags).replacer(replacement);
-  return new TransformStream({
-    transform(chunk, controller) {
-      const output = processor.write(chunk);
-      if (output) controller.enqueue(output);
-    },
-    flush(controller) {
-      const output = processor.finish();
-      if (output) controller.enqueue(output);
-    },
-  });
-}
+}: TextOptions): TransformStream<string, string> =>
+  new TransformStream(
+    streamOf(resolvePattern(pattern, flags).replacer(replacement), (output) =>
+      output ? [output] : [],
+    ),
+  );
+
+export const matchInStream = ({
+  pattern,
+  flags = '',
+}: MatchOptions): TransformStream<string, TextEvent> =>
+  new TransformStream(
+    streamOf(resolvePattern(pattern, flags).matcher(), (events) => events),
+  );

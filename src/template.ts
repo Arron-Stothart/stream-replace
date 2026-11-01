@@ -1,12 +1,31 @@
-import { decode, encode } from './decode.js';
-import type { Match, Replacement } from './replace.js';
+import { decode } from './decode.js';
+import type { TextMatch } from './substitution.js';
+import type { Projection } from './transducer.js';
 
 type Part = string | { readonly capture: string | null };
+
+export type CompiledTemplate =
+  | { readonly kind: 'projection'; readonly projection: Projection }
+  | { readonly kind: 'function'; readonly apply: (match: TextMatch) => string };
+
+function projection(parts: readonly Part[]): Projection | null {
+  const whole = parts.filter((part) => typeof part !== 'string');
+  if (whole.length > 1 || whole.some((part) => part.capture !== null))
+    return null;
+  const split = whole.length === 0 ? parts.length : parts.indexOf(whole[0]);
+  const text = (from: number, to: number): number[] =>
+    decode(parts.slice(from, to).join(''));
+  return {
+    open: text(0, split),
+    inside: whole.length === 1,
+    close: text(split + 1, parts.length),
+  };
+}
 
 export function compileTemplate(
   source: string,
   names: readonly string[],
-): Replacement<number> {
+): CompiledTemplate {
   decode(source);
   const parts: Part[] = [];
   let literal = '';
@@ -53,24 +72,19 @@ export function compileTemplate(
     parts.push({ capture: name });
   }
   if (literal) parts.push(literal);
-  if (parts.every((part) => typeof part === 'string'))
-    return Array.from(parts.join(''), (char) => char.codePointAt(0)!);
-  return (match: Match<number>) => {
-    let output = '';
-    for (const part of parts) {
-      if (typeof part === 'string') output += part;
-      else {
-        const span =
-          part.capture === null ? match : match.captures.get(part.capture);
-        if (span)
-          output += encode(
-            match.symbols.slice(
-              span.start - match.start,
-              span.end - match.start,
-            ),
-          );
-      }
-    }
-    return Array.from(output, (char) => char.codePointAt(0)!);
+  const projected = projection(parts);
+  if (projected !== null) return { kind: 'projection', projection: projected };
+  return {
+    kind: 'function',
+    apply: (match) =>
+      parts
+        .map((part) =>
+          typeof part === 'string'
+            ? part
+            : part.capture === null
+              ? match.text
+              : (match.captures.get(part.capture) ?? ''),
+        )
+        .join(''),
   };
 }
