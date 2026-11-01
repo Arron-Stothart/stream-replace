@@ -46,7 +46,7 @@ export class TextBuffer {
       first < this.chunks.length - 1 &&
       this.offsets[first + 1] <= offset - 2
     )
-      first++;
+      this.chunks[first++] = '';
     if (first > 64 && first * 2 > this.chunks.length) {
       this.chunks = this.chunks.slice(first);
       this.offsets = this.offsets.slice(first);
