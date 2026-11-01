@@ -1,13 +1,13 @@
-import type { Segment } from './match.js';
 import {
   compilePattern,
+  type MatchOptions,
   type Pattern,
+  type Replacement,
   type ReplaceOptions,
-} from './pattern.js';
-import type { Replacement } from './replacement.js';
-import type { Session } from './session.js';
+} from './api.js';
+import type { Segment, Session } from './output.js';
 
-export interface MatchStreamOptions {
+export interface MatchStreamOptions extends MatchOptions {
   readonly pattern: string | RegExp | Pattern;
   readonly flags?: string;
 }
@@ -21,7 +21,9 @@ function resolve({ pattern, flags }: MatchStreamOptions): Pattern {
   if (typeof pattern === 'string' || pattern instanceof RegExp)
     return compilePattern(pattern, flags);
   if (flags !== undefined)
-    throw new TypeError('A compiled pattern already has its flags');
+    throw new TypeError(
+      'Flags cannot be passed with a compiled pattern. It already has its own flags.',
+    );
   return pattern;
 }
 
@@ -51,4 +53,4 @@ export const replaceInStream = (
 export const matchInStream = (
   options: MatchStreamOptions,
 ): TransformStream<string, Segment> =>
-  transform(resolve(options).matcher(), (segments) => segments);
+  transform(resolve(options).matcher(options), (segments) => segments);

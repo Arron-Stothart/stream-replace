@@ -1,5 +1,4 @@
-import { holds } from '../dist/syntax/boundary.js';
-import { contains } from '../dist/syntax/charset.js';
+import { contains, holds } from '../dist/alphabet.js';
 
 function names(expression) {
   switch (expression.kind) {
@@ -83,11 +82,13 @@ export function* matches(expression, input, position = 0, captures = {}) {
   }
 }
 
-export function replace(expression, input, replacement) {
+export function replace(expression, input, replacement, limit = Infinity) {
   const output = [];
   let position = 0;
   while (position <= input.length) {
-    const result = matches(expression, input, position).next().value;
+    const result = matches(expression, input, position).find(
+      (found) => found.position - position <= limit,
+    );
     if (!result) {
       if (position === input.length) break;
       output.push(input[position++]);
