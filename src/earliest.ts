@@ -249,7 +249,7 @@ function markMatches(automaton: Automaton, spend: Spend): Graph<Mark> {
           );
           if (viable === undefined)
             throw new Error(
-              'Bug in regex-stream-transform: a replacement path has no way forward.',
+              'Bug in stream-replace: a replacement path has no way forward.',
             );
           state = viable;
           break;
@@ -266,7 +266,7 @@ function markMatches(automaton: Automaton, spend: Spend): Graph<Mark> {
     const current = source.state === null ? null : states[source.state];
     if (current !== null && current.kind !== 'consume')
       throw new Error(
-        'Bug in regex-stream-transform: a replacement step is incomplete.',
+        'Bug in stream-replace: a replacement step is incomplete.',
       );
     lookahead.atoms.forEach((range, atom) => {
       if (current !== null && !contains(current.ranges, range[0])) return;
@@ -337,7 +337,7 @@ function guaranteedOutput(
   }
   if (known.size !== nodes.length)
     throw new Error(
-      'Bug in regex-stream-transform: a replacement path can never finish.',
+      'Bug in stream-replace: a replacement path can never finish.',
     );
 
   const through = (edge: Edge<number>, symbol: number) => [
@@ -670,7 +670,7 @@ export class EarliestSession {
   private agreedOutput(): string {
     if (this.runs.length === 0)
       throw new Error(
-        'Bug in regex-stream-transform: no replacement path is left.',
+        'Bug in stream-replace: no replacement path is left.',
       );
     const { input } = this;
     const parts: string[] = [];

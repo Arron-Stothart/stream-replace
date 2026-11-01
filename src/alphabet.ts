@@ -40,7 +40,7 @@ export function normalize(values: readonly Range[]): readonly Range[] {
       start > end
     )
       throw new RangeError(
-        'Bug in regex-stream-transform: a character range is out of bounds.',
+        'Bug in stream-replace: a character range is out of bounds.',
       );
     const previous = result[result.length - 1];
     if (previous && start <= previous[1] + 1)

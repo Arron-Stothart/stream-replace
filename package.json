@@ -1,5 +1,5 @@
 {
-  "name": "regex-stream-transform",
+  "name": "stream-replace",
   "version": "0.1.0",
   "description": "Incremental regex replacement with exact literal emission",
   "type": "module",

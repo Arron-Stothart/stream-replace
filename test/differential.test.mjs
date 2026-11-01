@@ -5,7 +5,7 @@ import {
   literal,
   mapMatch,
   template,
-} from 'regex-stream-transform';
+} from 'stream-replace';
 
 function random(seed) {
   let state = seed;

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { compilePattern, mapMatch } from 'regex-stream-transform';
+import { compilePattern, mapMatch } from 'stream-replace';
 import { passages } from './citation-response.mjs';
 
 test('streamed citations resolve sources and line locators without leaking partial markers', () => {

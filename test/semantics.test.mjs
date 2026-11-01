@@ -7,7 +7,7 @@ import {
   matchInStream,
   replaceInStream,
   template,
-} from 'regex-stream-transform';
+} from 'stream-replace';
 import { parse } from '../dist/syntax.js';
 import { replace, words } from './reference.mjs';
 
