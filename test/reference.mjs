@@ -1,20 +1,38 @@
+import { holds } from '../dist/syntax/boundary.js';
+import { contains } from '../dist/syntax/charset.js';
+
+function names(expression) {
+  switch (expression.kind) {
+    case 'capture':
+      return [expression.name, ...names(expression.body)];
+    case 'sequence':
+      return expression.parts.flatMap(names);
+    case 'choice':
+      return expression.alternatives.flatMap(names);
+    case 'repeat':
+      return names(expression.body);
+    default:
+      return [];
+  }
+}
+
 export function* matches(expression, input, position = 0, captures = {}) {
   switch (expression.kind) {
     case 'empty':
       yield { position, captures };
       return;
-    case 'symbol':
-      if (position < input.length && expression.accepts(input[position]))
+    case 'chars':
+      if (
+        position < input.length &&
+        contains(expression.ranges, input[position])
+      )
         yield { position: position + 1, captures };
       return;
     case 'assert':
       if (
-        expression.accepts({
-          position,
+        holds(expression.boundary, {
           previous: input[position - 1],
           next: input[position],
-          hasNext: position < input.length,
-          ended: position === input.length,
         })
       )
         yield { position, captures };
@@ -41,7 +59,7 @@ export function* matches(expression, input, position = 0, captures = {}) {
       return;
     }
     case 'capture':
-      for (const next of matches(expression.body, input, position, captures)) {
+      for (const next of matches(expression.body, input, position, captures))
         yield {
           position: next.position,
           captures: {
@@ -49,32 +67,21 @@ export function* matches(expression, input, position = 0, captures = {}) {
             [expression.name]: [position, next.position],
           },
         };
-      }
       return;
-    case 'repeat':
-    case 'quantify': {
-      const minimum = expression.kind === 'repeat' ? 0 : expression.minimum;
-      const maximum =
-        expression.kind === 'repeat' ? Infinity : expression.maximum;
+    case 'repeat': {
+      const { minimum, maximum, greedy, body } = expression;
+      const inner = names(body);
       function* iterations(count, position, captures) {
-        if (count >= minimum && !expression.greedy)
-          yield { position, captures };
-        if (count < maximum)
-          for (const next of matches(
-            expression.body,
-            input,
-            position,
-            captures,
-          )) {
-            if (
-              count >= minimum &&
-              maximum === Infinity &&
-              next.position === position
-            )
-              continue;
+        if (count >= minimum && !greedy) yield { position, captures };
+        if (count < maximum) {
+          const cleared = { ...captures };
+          for (const name of inner) delete cleared[name];
+          for (const next of matches(body, input, position, cleared)) {
+            if (count >= minimum && next.position === position) continue;
             yield* iterations(count + 1, next.position, next.captures);
           }
-        if (count >= minimum && expression.greedy) yield { position, captures };
+        }
+        if (count >= minimum && greedy) yield { position, captures };
       }
       yield* iterations(0, position, captures);
     }
@@ -108,9 +115,8 @@ export function replace(expression, input, replacement) {
 
 export function words(alphabet, maximum) {
   const result = [[]];
-  for (let length = 1; length <= maximum; length++) {
+  for (let length = 1; length <= maximum; length++)
     for (const prefix of result.filter((word) => word.length === length - 1))
       for (const symbol of alphabet) result.push([...prefix, symbol]);
-  }
   return result;
 }

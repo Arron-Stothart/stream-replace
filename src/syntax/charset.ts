@@ -1,48 +1,35 @@
 export type Range = readonly [number, number];
 
-export const scalar = (value: number): boolean =>
-  Number.isInteger(value) &&
-  value >= 0 &&
-  value <= 0x10ffff &&
-  (value < 0xd800 || value > 0xdfff);
+export const MAX_CODE_POINT = 0x10ffff;
 
-export function ranges(values: readonly Range[]): readonly Range[] {
+export function normalize(values: readonly Range[]): readonly Range[] {
   const result: [number, number][] = [];
-  for (const [start, end] of [...values].sort(
-    (left, right) => left[0] - right[0],
-  )) {
+  for (const [start, end] of [...values].sort((a, b) => a[0] - b[0])) {
     if (
       !Number.isInteger(start) ||
       !Number.isInteger(end) ||
       start < 0 ||
-      end > 0x10ffff ||
+      end > MAX_CODE_POINT ||
       start > end
-    ) {
+    )
       throw new RangeError('Invalid code point range');
-    }
     const previous = result[result.length - 1];
     if (previous && start <= previous[1] + 1)
       previous[1] = Math.max(previous[1], end);
     else result.push([start, end]);
   }
-  return result.flatMap(([start, end]): Range[] => {
-    if (end < 0xd800 || start > 0xdfff) return [[start, end]];
-    const parts: Range[] = [];
-    if (start < 0xd800) parts.push([start, 0xd7ff]);
-    if (end > 0xdfff) parts.push([0xe000, end]);
-    return parts;
-  });
+  return result;
 }
 
 export function complement(values: readonly Range[]): readonly Range[] {
   const result: Range[] = [];
   let start = 0;
-  for (const [low, high] of ranges(values)) {
+  for (const [low, high] of normalize(values)) {
     if (start < low) result.push([start, low - 1]);
     start = high + 1;
   }
-  if (start <= 0x10ffff) result.push([start, 0x10ffff]);
-  return ranges(result);
+  if (start <= MAX_CODE_POINT) result.push([start, MAX_CODE_POINT]);
+  return result;
 }
 
 export function contains(values: readonly Range[], value: number): boolean {

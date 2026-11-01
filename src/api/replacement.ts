@@ -1,9 +1,9 @@
 export interface TextMatch {
   readonly text: string;
-  readonly groups: readonly (string | undefined)[];
-  readonly captures: ReadonlyMap<string, string | undefined>;
   readonly start: number;
   readonly end: number;
+  readonly groups: readonly (string | undefined)[];
+  readonly captures: ReadonlyMap<string, string | undefined>;
 }
 
 export type TextReplacement =
@@ -11,21 +11,19 @@ export type TextReplacement =
   | { readonly kind: 'template'; readonly source: string }
   | { readonly kind: 'callback'; readonly apply: (match: TextMatch) => string };
 
-export const literal = (
-  value: string,
-): Extract<TextReplacement, { kind: 'literal' }> => ({
+export const literal = (value: string): TextReplacement => ({
   kind: 'literal',
   value,
 });
-export const template = (
-  source: string,
-): Extract<TextReplacement, { kind: 'template' }> => ({
+
+export const template = (source: string): TextReplacement => ({
   kind: 'template',
   source,
 });
+
 export const mapMatch = (
   apply: (match: TextMatch) => string,
-): Extract<TextReplacement, { kind: 'callback' }> => ({
+): TextReplacement => ({
   kind: 'callback',
   apply,
 });

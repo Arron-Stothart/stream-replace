@@ -1,112 +1,157 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  literal,
-  template,
-  mapMatch,
-  compile,
-  parse,
-  replacer,
-  exactReplacer,
-  transducer,
-  codepoints,
-  choice,
-  sequence,
-  repeat,
-  empty,
-  capture,
   compilePattern,
+  literal,
+  mapMatch,
   replaceInStream,
-  symbol,
+  template,
 } from 'regex-stream-transform';
+import { automaton } from '../dist/nfa/automaton.js';
+import { compile } from '../dist/nfa/compile.js';
+import { Scanner } from '../dist/engine/scanner.js';
+import { TextBuffer } from '../dist/engine/text.js';
+import { Budget } from '../dist/engine/earliest/graph.js';
+import { project } from '../dist/engine/earliest/project.js';
+import { Runner } from '../dist/engine/earliest/runner.js';
+import { selection } from '../dist/engine/earliest/selection.js';
+import { parse } from '../dist/syntax/parse.js';
 import { replace, words } from './reference.mjs';
 
-const a = codepoints([[97, 97]]);
-const b = codepoints([[98, 98]]);
+const chars = (...values) => ({
+  kind: 'chars',
+  ranges: values.map((value) => [value, value]),
+});
+const a = chars(97);
+const b = chars(98);
+const empty = { kind: 'empty' };
+const choice = (...alternatives) => ({ kind: 'choice', alternatives });
+const sequence = (...parts) => ({ kind: 'sequence', parts });
+const star = (body, greedy = true) => ({
+  kind: 'repeat',
+  body,
+  minimum: 0,
+  maximum: Infinity,
+  greedy,
+});
+const capture = (name, body) => ({ kind: 'capture', name, body });
+const flags = { ignoreCase: false, multiline: false, dotAll: false };
 
 function expressions() {
-  const atoms = [a, b, empty(), choice()];
+  const atoms = [a, b, empty, choice()];
   const result = [...atoms];
   for (const left of atoms)
     for (const right of atoms)
       result.push(choice(left, right), sequence(left, right));
-  for (const body of [a, choice(a, b), repeat(a, false), choice(empty(), a)])
-    for (const greedy of [true, false]) {
+  for (const body of [
+    a,
+    choice(a, b),
+    star(a, false),
+    choice(empty, a),
+    choice(capture('c', a), b),
+  ])
+    for (const greedy of [true, false])
       result.push(
-        repeat(body, greedy),
-        sequence(repeat(body, greedy), b),
-        capture('outer', sequence(capture('inner', repeat(body, greedy)), a)),
+        star(body, greedy),
+        { kind: 'repeat', body, minimum: 1, maximum: 2, greedy },
+        sequence(star(body, greedy), b),
+        capture('outer', sequence(capture('inner', star(body, greedy)), a)),
       );
-    }
   return result;
 }
 
-test('both executors implement the independent ordered-expression semantics', () => {
+function scan(machine, input, replacement) {
+  const buffer = new TextBuffer();
+  const output = [];
+  const calls = [];
+  const sink = {
+    text: (from, to) => output.push(...input.slice(from, to)),
+    progress() {},
+    match(match) {
+      const captures = {};
+      machine.captures.forEach((name, index) => {
+        const [start, end] = [
+          match.slots[index * 2],
+          match.slots[index * 2 + 1],
+        ];
+        if (start !== null && end !== null) captures[name] = [start, end];
+      });
+      calls.push({ start: match.start, end: match.end, captures });
+      output.push(...replacement);
+    },
+  };
+  const scanner = new Scanner(machine, buffer, sink);
+  for (const value of input) scanner.write(String.fromCharCode(value));
+  scanner.finish();
+  return { output, calls };
+}
+
+function earliest(machine, input, replacement) {
+  const graph = project(
+    selection(machine, new Budget(1e7)),
+    { open: replacement, inside: false, close: [] },
+    new Budget(1e7),
+  );
+  const runner = new Runner(graph);
+  const output = [];
+  runner.agree(output);
+  for (const value of input) runner.read(value, output);
+  runner.finish(output);
+  return output;
+}
+
+test('both engines implement the independent ordered-expression semantics', () => {
   for (const expression of expressions()) {
-    const program = compile(expression);
-    for (const replacement of [[], [88]]) {
-      const machine = transducer(program, replacement);
+    const machine = automaton(compile(expression));
+    for (const replacement of [[], [88]])
       for (const input of words([97, 98], 3)) {
         const calls = [];
         const expected = replace(expression, input, (match) => {
           calls.push(match);
           return replacement;
         });
-        const observed = [];
-        const stream = replacer(program, (match) => {
-          observed.push({
-            start: match.start,
-            end: match.end,
-            captures: Object.fromEntries(
-              [...match.captures]
-                .filter(([, span]) => span !== null)
-                .map(([name, span]) => [name, [span.start, span.end]]),
-            ),
-          });
-          return replacement;
-        });
-        const exact = exactReplacer(machine);
-        const actual = [];
-        const earliest = [];
-        for (const value of input) {
-          actual.push(...stream.write([value]));
-          earliest.push(...exact.write([value]));
-        }
-        actual.push(...stream.finish());
-        earliest.push(...exact.finish());
-        assert.deepEqual(actual, expected);
-        assert.deepEqual(earliest, expected);
-        assert.deepEqual(observed, calls);
+        const scanned = scan(machine, input, replacement);
+        assert.deepEqual(scanned.output, expected);
+        assert.deepEqual(scanned.calls, calls);
+        assert.deepEqual(earliest(machine, input, replacement), expected);
       }
-    }
   }
 });
 
-test('literal emission includes output forced beyond an unresolved match', () => {
-  const branching = compilePattern('a*b|a').replacer(literal('X'));
+test('earliest emission writes output forced beyond an unresolved match', () => {
+  const branching = compilePattern('a*b|a').replacer(literal('X'), {
+    earliest: true,
+  });
   assert.equal(branching.write('a'), 'X');
   assert.equal(branching.write('a'), '');
   assert.equal(branching.finish(), 'X');
-  const repeated = compilePattern('a*').replacer(literal('X'));
+  const repeated = compilePattern('a*').replacer(literal('X'), {
+    earliest: true,
+  });
   assert.equal(repeated.write('a'), 'XX');
   assert.equal(repeated.finish(), '');
+  const plain = compilePattern('a*').replacer(literal('X'));
+  assert.equal(plain.write('a'), 'X');
+  assert.equal(plain.finish(), 'X');
 });
 
 test('committed output is a prefix of every examined continuation', () => {
-  for (const source of ['a*b|a', 'a*', 'ab|a', '^a|b$', '\\b[a-b]*\\b']) {
-    const expression = parse(source);
-    const pattern = compilePattern(source);
-    for (const prefix of words([97, 98], 3)) {
-      const stream = pattern.replacer(literal('X'));
-      const output = stream.write(String.fromCodePoint(...prefix));
-      for (const suffix of words([97, 98, 33], 3)) {
-        const expected = String.fromCodePoint(
-          ...replace(expression, [...prefix, ...suffix], () => [88]),
-        );
-        assert.ok(expected.startsWith(output));
+  for (const source of ['a*b|a', 'a*', 'ab|a', '^a|b$', '\\b[a-b]*\\b'])
+    for (const options of [{}, { earliest: true }]) {
+      const expression = parse(source, flags);
+      const pattern = compilePattern(source);
+      for (const prefix of words([97, 98], 3)) {
+        const output = pattern
+          .replacer(literal('X'), options)
+          .write(String.fromCodePoint(...prefix));
+        for (const suffix of words([97, 98, 33], 3)) {
+          const expected = String.fromCodePoint(
+            ...replace(expression, [...prefix, ...suffix], () => [88]),
+          );
+          assert.ok(expected.startsWith(output));
+        }
       }
     }
-  }
 });
 
 test('text results and callback spans are independent of UTF-16 chunk partitions', () => {
@@ -115,26 +160,38 @@ test('text results and callback spans are independent of UTF-16 chunk partitions
     literal('X'),
     template('$&'),
     mapMatch((match) => `${match.start}:${match.text}`),
-  ]) {
-    const pattern = compilePattern('.', 's');
-    const whole = pattern.replacer(replacement);
-    const expected = whole.write(input) + whole.finish();
-    for (let mask = 0; mask < 2 ** (input.length - 1); mask++) {
-      const stream = pattern.replacer(replacement);
-      let output = stream.write('');
-      let start = 0;
-      for (let index = 1; index <= input.length; index++)
-        if (index === input.length || mask & (1 << (index - 1))) {
-          output += stream.write(input.slice(start, index));
-          output += stream.write('');
-          start = index;
-        }
-      assert.equal(output + stream.finish(), expected);
+  ])
+    for (const options of [{}, { earliest: true }]) {
+      const pattern = compilePattern('.', 's');
+      const whole = pattern.replacer(replacement, options);
+      const expected = whole.write(input) + whole.finish();
+      assert.equal(
+        expected,
+        input.replace(
+          /./gsu,
+          replacement.kind === 'callback'
+            ? (text, start) => `${start}:${text}`
+            : replacement.kind === 'literal'
+              ? 'X'
+              : '$&',
+        ),
+      );
+      for (let mask = 0; mask < 2 ** (input.length - 1); mask++) {
+        const stream = pattern.replacer(replacement, options);
+        let output = stream.write('');
+        let start = 0;
+        for (let index = 1; index <= input.length; index++)
+          if (index === input.length || mask & (1 << (index - 1))) {
+            output += stream.write(input.slice(start, index));
+            output += stream.write('');
+            start = index;
+          }
+        assert.equal(output + stream.finish(), expected);
+      }
     }
-  }
 });
 
-test('the dialect rejects unsupported syntax and makes capture rules explicit', () => {
+test('the dialect follows JavaScript and rejects what it cannot support', () => {
   for (const source of [
     '*',
     'a**',
@@ -143,48 +200,43 @@ test('the dialect rejects unsupported syntax and makes capture rules explicit', 
     '[a-',
     'a{3,1}',
     '(?=a)',
+    '(?<=a)',
     '(a)\\1',
     '(?<x>a)(?<x>b)',
+    'a{',
   ])
-    assert.throws(() => compilePattern(source));
+    assert.throws(() => compilePattern(source), SyntaxError);
   assert.throws(() => compilePattern('a', 'y'), SyntaxError);
-  const retained = compilePattern('(?<outer>(?:(?<inner>a)|b)*)').replacer(
-    template('$<inner>'),
+  assert.throws(() => compilePattern(/a/), SyntaxError);
+  assert.throws(
+    () => compilePattern('a').replacer(template("$'")),
+    SyntaxError,
   );
-  assert.equal(retained.write('ab') + retained.finish(), 'a');
-  const nested = compilePattern('(a*?)*').replacer(literal('X'));
-  assert.equal(nested.write('aa') + nested.finish(), 'XX');
-  const zero = compilePattern('(a){0}').replacer(template('$1'));
-  assert.equal(zero.write('a') + zero.finish(), 'a');
+  const cases = [
+    ['(?<outer>(?:(?<inner>a)|b)*)', 'ab', '$<inner>'],
+    ['(?:(a)|b)*', 'ab', '[$1]'],
+    ['(a?){2,3}b', 'aab', '[$1]'],
+    ['(a*?)*', 'aa', 'X'],
+    ['(a){0}', 'a', '$1'],
+    ['(a)', 'a', '$0$10$01$<x>'],
+    ['(?<x>a)', 'a', '$<x>${x}$<y>'],
+    ['\\cJ', '\n', 'X'],
+  ];
+  for (const [source, input, replacement] of cases) {
+    const stream = compilePattern(source).replacer(template(replacement));
+    assert.equal(
+      stream.write(input) + stream.finish(),
+      input.replace(new RegExp(source, 'gu'), replacement),
+      source,
+    );
+  }
 });
 
 test('word boundaries use the same folded alphabet as word characters', () => {
-  const pattern = compilePattern('\\b\\w+\\b', 'i');
-  const stream = pattern.replacer(literal('X'));
-  assert.equal(stream.write('ſ K') + stream.finish(), 'X X');
-  const properties = compilePattern('\\p{Letter}+', 'u').replacer(literal('X'));
+  const stream = compilePattern('\\b\\w+\\b', 'i').replacer(literal('X'));
+  assert.equal(stream.write('ſ K') + stream.finish(), 'X X');
+  const properties = compilePattern('\\p{Letter}+').replacer(literal('X'));
   assert.equal(properties.write('λ🙂é') + properties.finish(), 'X🙂X');
-});
-
-test('memoized replacement reuses failure work after a delayed match', () => {
-  let evaluations = 0;
-  const letter = symbol((value) => {
-    evaluations++;
-    return value === 'a';
-  });
-  const end = symbol((value) => {
-    evaluations++;
-    return value === 'b';
-  });
-  const stream = replacer(
-    compile(choice(sequence(repeat(letter), end), letter)),
-    ['X'],
-  );
-  const length = 10000;
-  for (let index = 0; index < length; index++)
-    assert.deepEqual(stream.write(['a']), []);
-  assert.equal(stream.finish().join(''), 'X'.repeat(length));
-  assert.ok(evaluations <= length * 4);
 });
 
 test('sessions reject reentrancy and remain closed after failure or EOF', () => {
@@ -230,42 +282,32 @@ test('the exported Web Stream transform executes the built package', async () =>
   assert.equal(output, 'X!');
 });
 
-test('malformed UTF-16 fails the text session instead of entering the scalar model', () => {
+test('unpaired surrogates are ordinary code points, as with the u flag', () => {
   const stream = compilePattern('.').replacer(literal('X'));
   assert.equal(stream.write('\ud800'), '');
-  assert.throws(() => stream.finish(), /surrogate/);
-  assert.throws(() => stream.write('a'), /closed/);
-  assert.throws(
-    () => compilePattern('.').replacer(literal('X')).write('\udc00'),
-    /surrogate/,
+  assert.equal(stream.finish(), 'X');
+  const split = compilePattern('😀').replacer(literal('X'));
+  assert.equal(
+    split.write('a\ud83d') + split.write('\ude00b') + split.finish(),
+    'aXb',
   );
-  assert.throws(
-    () => compilePattern('.').replacer(literal('\ud800')),
-    /surrogate/,
-  );
-  assert.throws(
-    () =>
-      compilePattern('.')
-        .replacer(mapMatch(() => '\ud800'))
-        .write('a'),
-    /surrogate/,
-  );
+  const lone = compilePattern('[^a]').replacer(literal('\ud800'));
+  assert.equal(lone.write('\udc00') + lone.finish(), '\ud800');
 });
 
-test('replacement descriptions expose their interpretation and emission timing', () => {
+test('replacements are written as soon as their kind allows', () => {
   const pattern = compilePattern('(a+)');
   const fixed = pattern.replacer(literal('$1'));
-  assert.equal(fixed.emission, 'earliest');
   assert.equal(fixed.write('a'), '$1');
   assert.equal(fixed.write('a'), '');
   assert.equal(fixed.finish(), '');
 
   const captured = pattern.replacer(template('$1'));
-  assert.equal(captured.write('aa') + captured.finish(), 'aa');
+  assert.equal(captured.write('aa'), '');
+  assert.equal(captured.finish(), 'aa');
 
-  const identity = pattern.replacer(template('$&'));
-  assert.equal(identity.emission, 'earliest');
-  assert.equal(identity.write('aa'), 'aa');
+  const identity = pattern.replacer(template('<$&'));
+  assert.equal(identity.write('aa'), '<aa');
   assert.equal(identity.finish(), '');
 
   const calls = [];
@@ -275,16 +317,12 @@ test('replacement descriptions expose their interpretation and emission timing',
       return String(match.text.length);
     }),
   );
-  assert.equal(mapped.emission, 'after-match');
   assert.equal(mapped.write('a'), '');
   assert.equal(mapped.write('a'), '');
   assert.deepEqual(calls, []);
   assert.equal(mapped.finish(), '2');
   assert.deepEqual(calls, ['aa']);
-  assert.throws(
-    () => compilePattern('a').replacer(template('$1')),
-    /Unknown capture/,
-  );
+  assert.equal(compilePattern('a').replacer(template('$1')).write('a'), '$1');
 });
 
 test('pattern nesting does not consume the JavaScript call stack', () => {
