@@ -1,11 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-  compilePattern,
-  literal,
-  mapMatch,
-  template,
-} from 'stream-replace';
+import { compilePattern, literal, mapMatch, template } from 'stream-replace';
 
 function random(seed) {
   let state = seed;
@@ -40,17 +35,14 @@ function pattern({ next, pick }, depth) {
 }
 
 const replacements = [
-  { replacement: literal('X'), native: 'X', earliest: 'always' },
-  { replacement: template('[$&]'), native: '[$&]', earliest: 'always' },
-  { replacement: template('<$1>'), native: '<$1>', earliest: 'no-captures' },
+  { replacement: literal('X'), native: 'X' },
+  { replacement: template('[$&]'), native: '[$&]' },
+  { replacement: template('<$1>'), native: '<$1>' },
   {
     replacement: mapMatch((match) => `${match.start}:${match.text};`),
     native: (text, ...rest) => `${rest[rest.length - 2]}:${text};`,
-    earliest: 'never',
   },
 ];
-
-const capturing = /\((?!\?:)/;
 
 test('streamed replacement agrees with String.prototype.replace', () => {
   const generator = random(12345);
@@ -63,30 +55,18 @@ test('streamed replacement agrees with String.prototype.replace', () => {
       const input = Array.from({ length: next(10) }, () =>
         pick(['a', 'b', 'c', ' ', '\n', 'A']),
       ).join('');
-      for (const {
-        replacement,
-        native: equivalent,
-        earliest,
-      } of replacements) {
+      for (const { replacement, native: equivalent } of replacements) {
         const expected = input.replace(native, equivalent);
-        const supported =
-          earliest === 'always' ||
-          (earliest === 'no-captures' && !capturing.test(source));
-        for (const options of supported ? [{}, { earliest: true }] : [{}]) {
-          const label = JSON.stringify({ source, flags, input, options });
-          const stream = compilePattern(source, flags).replacer(
-            replacement,
-            options,
-          );
-          let output = '';
-          for (let start = 0; start < input.length; ) {
-            const end = start + 1 + next(3);
-            output += stream.write(input.slice(start, end));
-            assert.ok(expected.startsWith(output), label);
-            start = end;
-          }
-          assert.equal(output + stream.finish(), expected, label);
+        const label = JSON.stringify({ source, flags, input });
+        const stream = compilePattern(source, flags).replacer(replacement);
+        let output = '';
+        for (let start = 0; start < input.length; ) {
+          const end = start + 1 + next(3);
+          output += stream.write(input.slice(start, end));
+          assert.ok(expected.startsWith(output), label);
+          start = end;
         }
+        assert.equal(output + stream.finish(), expected, label);
       }
     }
   }

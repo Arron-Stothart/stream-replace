@@ -3,7 +3,6 @@ import {
   type MatchOptions,
   type Pattern,
   type Replacement,
-  type ReplaceOptions,
 } from './api.ts';
 import type { Segment, Session } from './output.ts';
 
@@ -12,8 +11,7 @@ export interface MatchStreamOptions extends MatchOptions {
   readonly flags?: string;
 }
 
-export interface ReplaceStreamOptions
-  extends MatchStreamOptions, ReplaceOptions {
+export interface ReplaceStreamOptions extends MatchStreamOptions {
   readonly replacement: Replacement;
 }
 

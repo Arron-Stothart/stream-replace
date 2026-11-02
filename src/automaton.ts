@@ -42,7 +42,7 @@ interface Program {
 
 type State =
   | Step
-  | { readonly kind: 'accept'; readonly progressed: boolean }
+  | { readonly kind: 'accept' }
   | { readonly kind: 'choose'; readonly successors: readonly number[] };
 
 export interface Automaton {
@@ -250,8 +250,7 @@ function successors(instruction: Instruction): readonly number[] {
 function observesProgress(program: Program): boolean[] {
   const { instructions } = program;
   const result = instructions.map(
-    (instruction) =>
-      instruction.kind === 'accept' || instruction.kind === 'progress',
+    (instruction) => instruction.kind === 'progress',
   );
   const predecessors: number[][] = instructions.map(() => []);
   instructions.forEach((instruction, index) => {
@@ -285,7 +284,7 @@ function trackProgress(program: Program): Automaton {
   function lowered(instruction: Instruction, progressed: boolean): State {
     switch (instruction.kind) {
       case 'accept':
-        return { kind: 'accept', progressed };
+        return { kind: 'accept' };
       case 'reject':
         return { kind: 'choose', successors: [] };
       case 'consume':

@@ -69,15 +69,13 @@ function streamed(source, input, replacement, options = {}) {
   return { output: output + stream.finish(), calls };
 }
 
-function earliest(source, input, replacement) {
-  const stream = compilePattern(source).replacer(replacement, {
-    earliest: true,
-  });
+function replaced(source, input, replacement) {
+  const stream = compilePattern(source).replacer(replacement);
   const output = input.map((value) => stream.write(text([value]))).join('');
   return output + stream.finish();
 }
 
-test('both backends follow the reference semantics', () => {
+test('replacement follows the reference semantics', () => {
   for (const source of patterns())
     for (const replacement of ['', 'X'])
       for (const input of words([97, 98], 3)) {
@@ -89,18 +87,18 @@ test('both backends follow the reference semantics', () => {
           label,
         );
         assert.equal(
-          earliest(source, input, literal(replacement)),
+          replaced(source, input, literal(replacement)),
           expected.output,
           label,
         );
       }
 });
 
-test('earliest output copies matched text exactly', () => {
+test('copying templates reproduce matched text exactly', () => {
   for (const source of patterns())
     for (const input of words([97, 98], 3))
       assert.equal(
-        earliest(source, input, template('[$&]')),
+        replaced(source, input, template('[$&]')),
         reference(source, input, (match) => `[${match}]`).output,
         source,
       );
@@ -117,40 +115,22 @@ test('a match length limit keeps the first match in priority order that fits', (
         );
 });
 
-test('earliest emission writes output forced beyond an unresolved match', () => {
-  const branching = compilePattern('a*b|a').replacer(literal('X'), {
-    earliest: true,
-  });
-  assert.equal(branching.write('a'), 'X');
-  assert.equal(branching.write('a'), '');
-  assert.equal(branching.finish(), 'X');
-  const repeated = compilePattern('a*').replacer(literal('X'), {
-    earliest: true,
-  });
-  assert.equal(repeated.write('a'), 'XX');
-  assert.equal(repeated.finish(), '');
-  const plain = compilePattern('a*').replacer(literal('X'));
-  assert.equal(plain.write('a'), 'X');
-  assert.equal(plain.finish(), 'X');
-});
-
 test('committed output is a prefix of every examined continuation', () => {
-  for (const source of ['a*b|a', 'a*', 'ab|a', '^a|b$', '\\b[a-b]*\\b'])
-    for (const options of [{}, { earliest: true }]) {
-      const expression = parse(source, flags);
-      const pattern = compilePattern(source);
-      for (const prefix of words([97, 98], 3)) {
-        const output = pattern
-          .replacer(literal('X'), options)
-          .write(String.fromCodePoint(...prefix));
-        for (const suffix of words([97, 98, 33], 3)) {
-          const expected = String.fromCodePoint(
-            ...replace(expression, [...prefix, ...suffix], () => [88]),
-          );
-          assert.ok(expected.startsWith(output));
-        }
+  for (const source of ['a*b|a', 'a*', 'ab|a', '^a|b$', '\\b[a-b]*\\b']) {
+    const expression = parse(source, flags);
+    const pattern = compilePattern(source);
+    for (const prefix of words([97, 98], 3)) {
+      const output = pattern
+        .replacer(literal('X'))
+        .write(String.fromCodePoint(...prefix));
+      for (const suffix of words([97, 98, 33], 3)) {
+        const expected = String.fromCodePoint(
+          ...replace(expression, [...prefix, ...suffix], () => [88]),
+        );
+        assert.ok(expected.startsWith(output));
       }
     }
+  }
 });
 
 test('text results and callback spans are independent of UTF-16 chunk partitions', () => {
@@ -159,37 +139,34 @@ test('text results and callback spans are independent of UTF-16 chunk partitions
     literal('X'),
     template('$&'),
     mapMatch((match) => `${match.start}:${match.text}`),
-  ])
-    for (const options of replacement.kind === 'map'
-      ? [{}]
-      : [{}, { earliest: true }]) {
-      const pattern = compilePattern('.', 's');
-      const whole = pattern.replacer(replacement, options);
-      const expected = whole.write(input) + whole.finish();
-      assert.equal(
-        expected,
-        input.replace(
-          /./gsu,
-          replacement.kind === 'map'
-            ? (text, start) => `${start}:${text}`
-            : replacement.kind === 'literal'
-              ? 'X'
-              : '$&',
-        ),
-      );
-      for (let mask = 0; mask < 2 ** (input.length - 1); mask++) {
-        const stream = pattern.replacer(replacement, options);
-        let output = stream.write('');
-        let start = 0;
-        for (let index = 1; index <= input.length; index++)
-          if (index === input.length || mask & (1 << (index - 1))) {
-            output += stream.write(input.slice(start, index));
-            output += stream.write('');
-            start = index;
-          }
-        assert.equal(output + stream.finish(), expected);
-      }
+  ]) {
+    const pattern = compilePattern('.', 's');
+    const whole = pattern.replacer(replacement);
+    const expected = whole.write(input) + whole.finish();
+    assert.equal(
+      expected,
+      input.replace(
+        /./gsu,
+        replacement.kind === 'map'
+          ? (text, start) => `${start}:${text}`
+          : replacement.kind === 'literal'
+            ? 'X'
+            : '$&',
+      ),
+    );
+    for (let mask = 0; mask < 2 ** (input.length - 1); mask++) {
+      const stream = pattern.replacer(replacement);
+      let output = stream.write('');
+      let start = 0;
+      for (let index = 1; index <= input.length; index++)
+        if (index === input.length || mask & (1 << (index - 1))) {
+          output += stream.write(input.slice(start, index));
+          output += stream.write('');
+          start = index;
+        }
+      assert.equal(output + stream.finish(), expected);
     }
+  }
 });
 
 test('the dialect follows JavaScript and rejects what it cannot support', () => {
@@ -373,35 +350,6 @@ test('options and replacements that cannot be honoured are rejected plainly', ()
       assert.match(error.message, message);
       return true;
     });
-  rejects(
-    () =>
-      pattern.replacer(
-        mapMatch(() => ''),
-        { earliest: true },
-      ),
-    TypeError,
-    /only works with literal\(\), or with a template/,
-  );
-  rejects(
-    () => pattern.replacer(template('$1'), { earliest: true }),
-    TypeError,
-    /only works with literal\(\), or with a template/,
-  );
-  rejects(
-    () => pattern.replacer(literal('X'), { earliest: true, maxMatchLength: 4 }),
-    TypeError,
-    /cannot be used together with maxMatchLength/,
-  );
-  rejects(
-    () => pattern.replacer(literal('X'), { earliest: 'no' }),
-    TypeError,
-    /earliest option must be true or false/,
-  );
-  rejects(
-    () => pattern.matcher({ earliest: true }),
-    TypeError,
-    /only applies to replacer\(\)/,
-  );
   for (const maxMatchLength of [-1, 1.5, NaN, '4'])
     rejects(
       () => pattern.matcher({ maxMatchLength }),
@@ -420,14 +368,6 @@ test('options and replacements that cannot be honoured are rejected plainly', ()
       TypeError,
       /must come from literal\(\), template\(\) or mapMatch\(\)/,
     );
-  rejects(
-    () =>
-      compilePattern('a(?:a|b){12}b').replacer(literal('X'), {
-        earliest: true,
-      }),
-    RangeError,
-    /too complex for the earliest option/,
-  );
   rejects(() => compilePattern('a{1000000000}'), RangeError, /too large/);
   rejects(
     () => compilePattern('a', 'v'),

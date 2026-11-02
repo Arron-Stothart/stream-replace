@@ -1,5 +1,4 @@
 import { compile } from './automaton.ts';
-import { Earliest } from './earliest.ts';
 import {
   mapping,
   projecting,
@@ -37,15 +36,11 @@ export interface MatchOptions {
   readonly maxMatchLength?: number;
 }
 
-export interface ReplaceOptions extends MatchOptions {
-  readonly earliest?: boolean;
-}
-
 export interface Pattern {
   readonly source: string;
   readonly flags: string;
   matcher(options?: MatchOptions): Session<Segment[]>;
-  replacer(replacement: Replacement, options?: ReplaceOptions): Session<string>;
+  replacer(replacement: Replacement, options?: MatchOptions): Session<string>;
 }
 
 function readSource(
@@ -124,12 +119,6 @@ function limitOf({ maxMatchLength = Infinity }: MatchOptions): number {
   return maxMatchLength;
 }
 
-function earliestOf({ earliest = false }: ReplaceOptions): boolean {
-  if (typeof earliest !== 'boolean')
-    throw new TypeError('The earliest option must be true or false.');
-  return earliest;
-}
-
 const invalidReplacement =
   'The replacement must come from literal(), template() or mapMatch().';
 
@@ -159,39 +148,24 @@ export function compilePattern(
 ): Pattern {
   const { source, flags: canonical, settings } = readSource(pattern, flags);
   const automaton = compile(parse(source, settings));
-  const earliest = new Earliest(automaton);
 
   function replacer(
     replacement: Replacement,
-    options: ReplaceOptions = {},
+    options: MatchOptions = {},
   ): Session<string> {
-    const limit = limitOf(options);
-    const early = earliestOf(options);
     const rendering = renderingOf(replacement, automaton.captures);
-    if (!early)
-      return guard(
-        drive(
-          automaton,
-          limit,
-          typeof rendering === 'function'
-            ? mapping(rendering)
-            : projecting(rendering),
-        ),
-      );
-    if (limit !== Infinity)
-      throw new TypeError(
-        'The earliest option cannot be used together with maxMatchLength.',
-      );
-    if (typeof rendering === 'function')
-      throw new TypeError(
-        'The earliest option only works with literal(), or with a template whose only reference is $&.',
-      );
-    return guard(earliest.replace(rendering));
+    return guard(
+      drive(
+        automaton,
+        limitOf(options),
+        typeof rendering === 'function'
+          ? mapping(rendering)
+          : projecting(rendering),
+      ),
+    );
   }
 
   function matcher(options: MatchOptions = {}): Session<Segment[]> {
-    if ('earliest' in options)
-      throw new TypeError('The earliest option only applies to replacer().');
     return guard(drive(automaton, limitOf(options), segments()));
   }
 

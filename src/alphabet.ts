@@ -147,19 +147,6 @@ export function holdsWithoutNext(
   }
 }
 
-export function charactersExamined(boundary: Boundary): readonly Range[] {
-  switch (boundary.kind) {
-    case 'start':
-    case 'end':
-      return [];
-    case 'line-start':
-    case 'line-end':
-      return lineTerminators;
-    case 'word':
-      return boundary.word;
-  }
-}
-
 const properties = new Map<string, readonly Range[]>();
 
 export function property(name: string): readonly Range[] {
