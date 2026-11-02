@@ -8,5 +8,11 @@ export default [
   { files: ['test/**/*.mjs'], languageOptions: { globals: { ReadableStream: 'readonly' } } },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
+  {
+    files: ['src/core/**/*.ts'],
+    rules: {
+      'no-restricted-imports': ['error', { patterns: ['../*'] }],
+    },
+  },
 ];
 

@@ -5,7 +5,7 @@ import {
   width,
   type Range,
 } from './alphabet.ts';
-import { firstCodePoints, type Automaton } from './automaton.ts';
+import { firstCodePoints, type CompiledPattern } from './compiled-pattern.ts';
 
 export interface Span {
   readonly start: number;
@@ -126,7 +126,7 @@ class Threads {
 }
 
 class Vm {
-  private readonly automaton: Automaton;
+  private readonly compiledPattern: CompiledPattern;
   private readonly first: readonly Range[] | null;
   private readonly empty: Slots;
   private readonly limit: number;
@@ -148,12 +148,14 @@ class Vm {
     slots: [] as Slots[],
   };
 
-  constructor(automaton: Automaton, limit: number) {
-    this.automaton = automaton;
+  constructor(compiledPattern: CompiledPattern, limit: number) {
+    this.compiledPattern = compiledPattern;
     this.limit = limit;
-    this.first = firstCodePoints(automaton);
-    const states = automaton.states.length;
-    this.empty = new Float64Array(automaton.captures.length * 2).fill(UNSET);
+    this.first = firstCodePoints(compiledPattern);
+    const states = compiledPattern.states.length;
+    this.empty = new Float64Array(compiledPattern.captures.length * 2).fill(
+      UNSET,
+    );
     this.threads = new Threads(states);
     this.spare = new Threads(states);
     this.visited = new Int32Array(states);
@@ -234,7 +236,7 @@ class Vm {
   }
 
   private expand(previous: number | undefined, next: number): boolean {
-    const { states, entry } = this.automaton;
+    const { states, entry } = this.compiledPattern;
     const { visited, reached, stack, suspected } = this;
     const seeds = this.threads;
     const ready = this.spare;
@@ -334,7 +336,7 @@ class Vm {
   }
 
   private step(symbol: number, width: number): void {
-    const { states } = this.automaton;
+    const { states } = this.compiledPattern;
     const ready = this.threads;
     const following = this.spare;
     const oldestAllowed = this.at + width - this.limit;
@@ -356,14 +358,14 @@ class Vm {
   }
 }
 
-export class Search {
+export class Scanner {
   private readonly vm: Vm;
   private decided = 0;
   private announced = -1;
   private afterEmptyMatch = false;
 
-  constructor(automaton: Automaton, limit: number) {
-    this.vm = new Vm(automaton, limit);
+  constructor(compiledPattern: CompiledPattern, limit: number) {
+    this.vm = new Vm(compiledPattern, limit);
   }
 
   run(input: Input, decisions: Decisions): void {

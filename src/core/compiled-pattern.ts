@@ -45,25 +45,27 @@ type State =
   | { readonly kind: 'accept' }
   | { readonly kind: 'choose'; readonly successors: readonly number[] };
 
-export interface Automaton {
+export interface CompiledPattern {
   readonly entry: number;
   readonly states: readonly State[];
   readonly captures: readonly (string | null)[];
 }
 
-export function compile(expression: Expression): Automaton {
+export function compile(expression: Expression): CompiledPattern {
   return trackProgress(program(expression));
 }
 
-export function firstCodePoints(automaton: Automaton): readonly Range[] | null {
+export function firstCodePoints(
+  compiledPattern: CompiledPattern,
+): readonly Range[] | null {
   const ranges: Range[] = [];
   const seen = new Set<number>();
-  const pending = [automaton.entry];
+  const pending = [compiledPattern.entry];
   while (pending.length > 0) {
     const index = pending.pop()!;
     if (seen.has(index)) continue;
     seen.add(index);
-    const state = automaton.states[index];
+    const state = compiledPattern.states[index];
     switch (state.kind) {
       case 'accept':
       case 'assert':
@@ -270,7 +272,7 @@ function observesProgress(program: Program): boolean[] {
   return result;
 }
 
-function trackProgress(program: Program): Automaton {
+function trackProgress(program: Program): CompiledPattern {
   const observed = observesProgress(program);
   const base: number[] = [];
   let count = 0;

@@ -1,21 +1,13 @@
-import { compile } from './automaton.ts';
+import { compile } from './core/compiled-pattern.ts';
 import {
-  mapping,
-  projecting,
-  drive,
+  createChunkProcessor,
   segments,
-  Template,
   type Match,
-  type Projection,
   type Segment,
-  type Session,
-} from './output.ts';
-import { parse, type Flags } from './syntax.ts';
-
-export type Replacement =
-  | { readonly kind: 'literal'; readonly value: string }
-  | { readonly kind: 'template'; readonly source: string }
-  | { readonly kind: 'map'; readonly apply: (match: Match) => string };
+  type ChunkProcessor,
+} from './core/chunk-processor.ts';
+import { replacing, type Replacement } from './core/replacement.ts';
+import { parse, type Flags } from './core/syntax.ts';
 
 export const literal = (value: string): Replacement => ({
   kind: 'literal',
@@ -36,11 +28,21 @@ export interface MatchOptions {
   readonly maxMatchLength?: number;
 }
 
+export interface Replacer {
+  write(chunk: string): string;
+  finish(): string;
+}
+
+export interface Matcher {
+  write(chunk: string): Segment[];
+  finish(): Segment[];
+}
+
 export interface Pattern {
   readonly source: string;
   readonly flags: string;
-  matcher(options?: MatchOptions): Session<Segment[]>;
-  replacer(replacement: Replacement, options?: MatchOptions): Session<string>;
+  matcher(options?: MatchOptions): Matcher;
+  replacer(replacement: Replacement, options?: MatchOptions): Replacer;
 }
 
 function readSource(
@@ -79,17 +81,20 @@ function readSource(
   };
 }
 
-const unavailable = {
-  running:
-    'This stream is still running an earlier call. Wait for it to return first.',
-  finished: 'This stream has already finished.',
-  failed: 'This stream failed earlier and cannot be used again.',
-};
-
-function guard<Output>(inner: Session<Output>): Session<Output> {
+function checked<Output>(
+  inner: ChunkProcessor<Output>,
+): ChunkProcessor<Output> {
   let status: 'ready' | 'running' | 'finished' | 'failed' = 'ready';
   function run(final: boolean, operation: () => Output): Output {
-    if (status !== 'ready') throw new TypeError(unavailable[status]);
+    if (status !== 'ready')
+      throw new TypeError(
+        {
+          running:
+            'This stream is still running an earlier call. Wait for it to return first.',
+          finished: 'This stream has already finished.',
+          failed: 'This stream failed earlier and cannot be used again.',
+        }[status],
+      );
     status = 'running';
     try {
       const output = operation();
@@ -119,27 +124,30 @@ function limitOf({ maxMatchLength = Infinity }: MatchOptions): number {
   return maxMatchLength;
 }
 
-const invalidReplacement =
-  'The replacement must come from literal(), template() or mapMatch().';
-
-function renderingOf(
-  replacement: Replacement,
-  names: readonly (string | null)[],
-): Projection | ((match: Match) => string) {
+function replacementOf(replacement: Replacement): Replacement {
   switch (replacement?.kind) {
     case 'literal':
       if (typeof replacement.value !== 'string') break;
-      return { open: replacement.value, copy: false, close: '' };
-    case 'template': {
+      return replacement;
+    case 'template':
       if (typeof replacement.source !== 'string') break;
-      const template = new Template(replacement.source, names);
-      return template.projection() ?? ((match) => template.render(match));
+      return replacement;
+    case 'map': {
+      const { apply } = replacement;
+      if (typeof apply !== 'function') break;
+      return mapMatch((match) => {
+        const text = apply(match);
+        if (typeof text !== 'string')
+          throw new TypeError(
+            `The mapMatch function must return a string, not ${typeof text}.`,
+          );
+        return text;
+      });
     }
-    case 'map':
-      if (typeof replacement.apply !== 'function') break;
-      return replacement.apply;
   }
-  throw new TypeError(invalidReplacement);
+  throw new TypeError(
+    'The replacement must come from literal(), template() or mapMatch().',
+  );
 }
 
 export function compilePattern(
@@ -147,26 +155,25 @@ export function compilePattern(
   flags?: string,
 ): Pattern {
   const { source, flags: canonical, settings } = readSource(pattern, flags);
-  const automaton = compile(parse(source, settings));
+  const compiledPattern = compile(parse(source, settings));
 
   function replacer(
     replacement: Replacement,
     options: MatchOptions = {},
-  ): Session<string> {
-    const rendering = renderingOf(replacement, automaton.captures);
-    return guard(
-      drive(
-        automaton,
-        limitOf(options),
-        typeof rendering === 'function'
-          ? mapping(rendering)
-          : projecting(rendering),
-      ),
+  ): Replacer {
+    const collector = replacing(
+      replacementOf(replacement),
+      compiledPattern.captures,
+    );
+    return checked(
+      createChunkProcessor(compiledPattern, limitOf(options), collector),
     );
   }
 
-  function matcher(options: MatchOptions = {}): Session<Segment[]> {
-    return guard(drive(automaton, limitOf(options), segments()));
+  function matcher(options: MatchOptions = {}): Matcher {
+    return checked(
+      createChunkProcessor(compiledPattern, limitOf(options), segments()),
+    );
   }
 
   return { source, flags: canonical, matcher, replacer };

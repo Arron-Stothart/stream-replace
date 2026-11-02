@@ -8,7 +8,7 @@ import {
   replaceInStream,
   template,
 } from 'stream-replace';
-import { parse } from '../dist/syntax.js';
+import { parse } from '../dist/core/syntax.js';
 import { replace, words } from './reference.mjs';
 
 const flags = { ignoreCase: false, multiline: false, dotAll: false };
@@ -220,7 +220,7 @@ test('word boundaries use the same folded alphabet as word characters', () => {
   assert.equal(properties.write('λ🙂é') + properties.finish(), 'X🙂X');
 });
 
-test('sessions reject reentrancy and remain closed after failure or EOF', () => {
+test('replacers and matchers reject reentrancy and remain closed after failure or EOF', () => {
   const error = new Error('replacement');
   const failed = compilePattern('a').replacer(
     mapMatch(() => {

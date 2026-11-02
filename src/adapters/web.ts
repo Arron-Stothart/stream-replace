@@ -1,10 +1,6 @@
-import {
-  compilePattern,
-  type MatchOptions,
-  type Pattern,
-  type Replacement,
-} from './api.ts';
-import type { Segment, Session } from './output.ts';
+import { compilePattern, type MatchOptions, type Pattern } from '../api.ts';
+import type { Segment, ChunkProcessor } from '../core/chunk-processor.ts';
+import type { Replacement } from '../core/replacement.ts';
 
 export interface MatchStreamOptions extends MatchOptions {
   readonly pattern: string | RegExp | Pattern;
@@ -26,7 +22,7 @@ function resolve({ pattern, flags }: MatchStreamOptions): Pattern {
 }
 
 function transform<Output, Chunk>(
-  session: Session<Output>,
+  processor: ChunkProcessor<Output>,
   chunks: (output: Output) => readonly Chunk[],
 ): TransformStream<string, Chunk> {
   const send = (
@@ -36,8 +32,8 @@ function transform<Output, Chunk>(
     for (const chunk of chunks(output)) controller.enqueue(chunk);
   };
   return new TransformStream({
-    transform: (chunk, controller) => send(session.write(chunk), controller),
-    flush: (controller) => send(session.finish(), controller),
+    transform: (chunk, controller) => send(processor.write(chunk), controller),
+    flush: (controller) => send(processor.finish(), controller),
   });
 }
 

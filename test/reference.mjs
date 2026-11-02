@@ -1,4 +1,4 @@
-import { contains, holds } from '../dist/alphabet.js';
+import { contains, holds } from '../dist/core/alphabet.js';
 
 function names(expression) {
   switch (expression.kind) {

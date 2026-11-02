@@ -43,9 +43,7 @@ test('streamed citations resolve sources and line locators without leaking parti
     assert.equal(rendered.length, calls);
   }
   assert.equal(stream.finish(), '\uE200cite\uE202turn0fi');
-  assert.deepEqual(rendered, [
-    '\uE200cite\uE202turn0file0\uE202L8-L13\uE201',
-  ]);
+  assert.deepEqual(rendered, ['\uE200cite\uE202turn0file0\uE202L8-L13\uE201']);
 
   const unresolved =
     '\n\nUnknown: \uE200cite\uE202turn9file9\uE201\nUnfinished: \uE200cite\uE202turn0fi';
